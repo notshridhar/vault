@@ -1,0 +1,5 @@
+# target files
+/target/
+
+# secret data for testing
+/*.raw

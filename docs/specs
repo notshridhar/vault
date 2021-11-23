@@ -1,0 +1,14 @@
+specifications
+--------------
+
+data/{ns}_kv.raw
+data/{ns}_fs_xxx.raw
+
+[kv] (priority: high)
+single file storing all text key-value pairs
+every update rewrites file
+json format
+
+[fs] (priority: low)
+encrypt entire files
+store file metadata in kv and expose only numbers
