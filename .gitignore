@@ -3,3 +3,6 @@
 
 # secret data for testing
 /*.raw
+
+# system cache
+.DS_Store
