@@ -3,7 +3,7 @@ mod error;
 
 use error::VaultError;
 use itertools::Itertools;
-use rpassword::prompt_password_stdout;
+use rpassword;
 use std::collections::HashMap;
 use std::env::args;
 use std::fs;
@@ -16,17 +16,28 @@ fn prompt_input_stdout(prompt: &str) -> io::Result<String> {
     print!("{}", prompt);
     io::stdout().flush().unwrap();
     io::stdin().read_line(&mut answer)?;
+    print!("\x1b[1A\x1b[2K");
+    io::stdout().flush().unwrap();
     Ok(answer)
 }
 
+fn prompt_secret_stdout(prompt: &str) -> io::Result<String> {
+    let result = rpassword::prompt_password_stdout(prompt)?;
+    print!("\x1b[1A\x1b[2K");
+    io::stdout().flush().unwrap();
+    Ok(result)
+}
+
 fn get_vault_kv_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
-    let password = prompt_password_stdout("password: ").unwrap();
-    let file_path = format!("{}_kv.raw", namespace);
+    let password = prompt_secret_stdout("password: ").unwrap();
+    let file_path = format!("{}_kv.vlt", namespace);
 
     let secret_map = match fs::read(&file_path) {
         Ok(raw) => crypto::decrypt_kv(&raw, &password)?,
         Err(_err) => HashMap::new(),
     };
+
+    let mut lines_written = 0;
 
     if secret_path.ends_with('*') {
         let should_list_all = secret_path.ends_with("**");
@@ -38,27 +49,35 @@ fn get_vault_kv_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
             let is_child = key.matches('/').count() == required_levels;
             if is_equal || (is_subpath && (should_list_all || is_child)) {
                 println!("{}: {}", key, value);
+                lines_written += 1;
             };
         }
     } else {
         if let Some(value) = secret_map.get(secret_path) {
             println!("{}: {}", secret_path, value);
+            lines_written += 1;
         };
     };
+
+    prompt_secret_stdout("press enter key to exit").unwrap();
+
+    for _ in 0..lines_written {
+        print!("\x1b[1A\x1b[2K");
+    }
 
     Ok(())
 }
 
 fn set_vault_kv_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
-    let password = prompt_password_stdout("password: ").unwrap();
-    let file_path = format!("{}_kv.raw", namespace);
+    let password = prompt_secret_stdout("password: ").unwrap();
+    let file_path = format!("{}_kv.vlt", namespace);
 
     let mut secret_map = match fs::read(&file_path) {
         Ok(raw) => crypto::decrypt_kv(&raw, &password)?,
         Err(_err) => HashMap::new(),
     };
 
-    let secret = prompt_password_stdout("secret: ").unwrap();
+    let secret = prompt_secret_stdout("secret: ").unwrap();
     let previous_secret = match secret.len() {
         0 => secret_map.remove(secret_path),
         _ => secret_map.insert(secret_path.to_string(), secret),
@@ -67,7 +86,6 @@ fn set_vault_kv_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
     if previous_secret.is_some() {
         let answer = prompt_input_stdout("overwrite? [y/N] ").unwrap();
         if answer.trim_end().to_lowercase() != "y" {
-            println!("no changes");
             return Ok(());
         };
     };
@@ -75,7 +93,7 @@ fn set_vault_kv_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
     let map_enc = crypto::encrypt_kv(&secret_map, &password).unwrap();
     fs::write(&file_path, map_enc).unwrap();
 
-    println!("set secret");
+    println!("success");
     Ok(())
 }
 
