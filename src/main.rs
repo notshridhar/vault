@@ -61,9 +61,17 @@ fn get_vault_kv_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
 
     prompt_secret_stdout("press enter key to exit").unwrap();
 
-    for _ in 0..lines_written {
-        print!("\x1b[1A\x1b[2K");
-    }
+    // for get operation, single line is written, which can be cleared easily.
+    // for list operations, the lines written can exceed the terminal height,
+    // which makes it nearly impossible to clear the lines which are pushed
+    // to scrollback. therefore, we attempt to clear the entire scrollback.
+    if lines_written == 1 {
+        print!("\x1b[1F\x1b[2K");
+        io::stdout().flush().unwrap();
+    } else {
+        print!("\x1b[3J\x1b[H\x1b[2J");
+        io::stdout().flush().unwrap();
+    };
 
     Ok(())
 }
