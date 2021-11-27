@@ -5,6 +5,7 @@ authors = ["shridhar hegde <shridhar.me.003@gmail.com>"]
 edition = "2021"
 
 [dependencies]
+itertools = "0.10"
 orion = "0.16"
 rpassword = "5.0"
 serde_json = "1.0"
