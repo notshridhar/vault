@@ -9,8 +9,12 @@ Because I like simple stuff with minimal BS.
 
 ## Usage
 ```sh
-vault set {namespace}::kv::{path}
-vault get {namespace}::kv::{path}
+vault kv set {namespace}::{path}
+vault kv get {namespace}::{path}
+
+vault fs set {namespace}::{path}
+vault fs rem {namespace}::{path}
+vault fs get {namespace}::{path}
 ```
 
 Password will be prompted securely for both the operations. For the `set` operation, the secret value will also be prompted.

@@ -1,136 +1,36 @@
 mod crypto;
+mod engine_fs;
+mod engine_kv;
 mod error;
+mod prompt;
+mod utils;
 
-use error::VaultError;
-use itertools::Itertools;
-use rpassword;
-use std::collections::HashMap;
-use std::env::args;
-use std::fs;
-use std::io::{self, Write};
+use crate::error::VaultError;
+use std::env;
 
 type VaultResult<T> = Result<T, VaultError>;
 
-fn prompt_input_stdout(prompt: &str) -> io::Result<String> {
-    let mut answer = String::new();
-    print!("{}", prompt);
-    io::stdout().flush().unwrap();
-    io::stdin().read_line(&mut answer)?;
-    print!("\x1b[1A\x1b[2K");
-    io::stdout().flush().unwrap();
-    Ok(answer)
-}
-
-fn prompt_secret_stdout(prompt: &str) -> io::Result<String> {
-    let result = rpassword::prompt_password_stdout(prompt)?;
-    print!("\x1b[1A\x1b[2K");
-    io::stdout().flush().unwrap();
-    Ok(result)
-}
-
-fn get_vault_kv_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
-    let password = prompt_secret_stdout("password: ").unwrap();
-    let file_path = format!("{}_kv.vlt", namespace);
-
-    let secret_map = match fs::read(&file_path) {
-        Ok(raw) => crypto::decrypt_kv(&raw, &password)?,
-        Err(_err) => HashMap::new(),
-    };
-
-    let mut lines_written = 0;
-
-    if secret_path.ends_with('*') {
-        let should_list_all = secret_path.ends_with("**");
-        let secret_path = secret_path.trim_end_matches('*');
-        let required_levels = secret_path.matches('/').count();
-        for (key, value) in secret_map.iter().sorted() {
-            let is_equal = key == secret_path;
-            let is_subpath = key.starts_with(secret_path);
-            let is_child = key.matches('/').count() == required_levels;
-            if is_equal || (is_subpath && (should_list_all || is_child)) {
-                println!("{}: {}", key, value);
-                lines_written += 1;
-            };
-        }
-    } else {
-        if let Some(value) = secret_map.get(secret_path) {
-            println!("{}: {}", secret_path, value);
-            lines_written += 1;
-        };
-    };
-
-    prompt_secret_stdout("press enter key to exit").unwrap();
-
-    // for get operation, single line is written, which can be cleared easily.
-    // for list operations, the lines written can exceed the terminal height,
-    // which makes it nearly impossible to clear the lines which are pushed
-    // to scrollback. therefore, we attempt to clear the entire scrollback.
-    if lines_written == 1 {
-        print!("\x1b[1F\x1b[2K");
-        io::stdout().flush().unwrap();
-    } else {
-        print!("\x1b[3J\x1b[H\x1b[2J");
-        io::stdout().flush().unwrap();
-    };
-
-    Ok(())
-}
-
-fn set_vault_kv_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
-    let password = prompt_secret_stdout("password: ").unwrap();
-    let file_path = format!("{}_kv.vlt", namespace);
-
-    let mut secret_map = match fs::read(&file_path) {
-        Ok(raw) => crypto::decrypt_kv(&raw, &password)?,
-        Err(_err) => HashMap::new(),
-    };
-
-    let secret = prompt_secret_stdout("secret: ").unwrap();
-    let previous_secret = match secret.len() {
-        0 => secret_map.remove(secret_path),
-        _ => secret_map.insert(secret_path.to_string(), secret),
-    };
-
-    if previous_secret.is_some() {
-        let answer = prompt_input_stdout("overwrite? [y/N] ").unwrap();
-        if answer.trim_end().to_lowercase() != "y" {
-            return Ok(());
-        };
-    };
-
-    let map_enc = crypto::encrypt_kv(&secret_map, &password).unwrap();
-    fs::write(&file_path, map_enc).unwrap();
-
-    println!("success");
-    Ok(())
-}
-
-fn get_vault_fs_secret(_namespace: &str, _secret_path: &str) -> VaultResult<()> {
-    Ok(())
-}
-
-fn set_vault_fs_secret(_namespace: &str, _secret_path: &str) -> VaultResult<()> {
-    Ok(())
-}
-
 fn main_app() -> VaultResult<()> {
-    let command = args().nth(1).ok_or(VaultError::InvalidCommand)?;
-    let full_path = args().nth(2).ok_or(VaultError::InvalidCommand)?;
+    let mut args = env::args();
+    let _app_path = args.next().ok_or(VaultError::InvalidPath)?;
+    let engine = args.next().ok_or(VaultError::InvalidPath)?;
+    let command = args.next().ok_or(VaultError::InvalidPath)?;
+    let full_path = args.next().ok_or(VaultError::InvalidPath)?;
 
-    let split_path = full_path.split("::").collect::<Vec<_>>();
-    let namespace = split_path.get(0).ok_or(VaultError::InvalidPath)?;
-    let secret_type = split_path.get(1).ok_or(VaultError::InvalidPath)?;
-    let secret_path = split_path.get(2).ok_or(VaultError::InvalidPath)?;
+    let mut split_path = full_path.split("::");
+    let namespace = split_path.next().ok_or(VaultError::InvalidPath)?;
+    let secret_path = split_path.next().ok_or(VaultError::InvalidPath)?;
 
-    match command.as_str() {
-        "get" => match secret_type.to_owned() {
-            "kv" => get_vault_kv_secret(namespace, secret_path),
-            "fs" => get_vault_fs_secret(namespace, secret_path),
+    match engine.as_str() {
+        "kv" => match command.as_str() {
+            "get" => engine_kv::get_secret(namespace, secret_path),
+            "set" => engine_kv::set_secret(namespace, secret_path),
             _ => Err(VaultError::InvalidCommand),
         },
-        "set" => match secret_type.to_owned() {
-            "kv" => set_vault_kv_secret(namespace, secret_path),
-            "fs" => set_vault_fs_secret(namespace, secret_path),
+        "fs" => match command.as_str() {
+            "get" => engine_fs::get_secret(namespace, secret_path),
+            "set" => engine_fs::set_secret(namespace, secret_path),
+            "rem" => engine_fs::rem_secret(namespace, secret_path),
             _ => Err(VaultError::InvalidCommand),
         },
         _ => Err(VaultError::InvalidCommand),
