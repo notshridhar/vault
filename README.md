@@ -34,6 +34,12 @@ cargo build --release
 
 The generated executable can be found in `./targets/release`.
 
+## Running Tests
+Execute the following command to run all tests -
+```sh
+cargo test
+```
+
 ## Security considerations
 Authenticated encryption is done using XChaCha20 and Poly1305 algorithms. The key size is 256 bits, so the maximum password length is 32 characters. Use a strong password to ensure maximum safety against dictionary attacks.
 
