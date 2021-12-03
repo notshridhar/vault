@@ -5,6 +5,9 @@ mod error;
 mod prompt;
 mod utils;
 
+#[cfg(test)]
+mod tests;
+
 use crate::error::VaultError;
 use std::env;
 

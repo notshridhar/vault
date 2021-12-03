@@ -43,7 +43,7 @@ pub fn set_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
     let unlock_files = format!("unlock/{}", secret_path);
     for unlock_file in utils::get_matching_files(&unlock_files).unwrap() {
         let index_key = unlock_file.strip_prefix("unlock/").unwrap();
-        
+
         let index_val = if index_map.contains_key(index_key) {
             index_map.get(index_key).unwrap().parse::<u16>().unwrap()
         } else {
@@ -51,7 +51,7 @@ pub fn set_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
             index_map.insert(index_key.to_string(), index_val.to_string());
             index_val
         };
-        
+
         let lock_file = format!("{}_fs_{:0>3}.vlt", namespace, index_val);
         crypto::encrypt_file(&unlock_file, &lock_file, &password)?;
     }
@@ -75,13 +75,13 @@ pub fn rem_secret(namespace: &str, secret_path: &str) -> VaultResult<()> {
     };
 
     let index_keys = utils::get_matching_keys(&index_map, secret_path);
-    
+
     if index_keys.is_empty() == false {
         let answer = prompt::prompt_input_disappear("remove? [y/N] ").unwrap();
         if answer.trim_end().to_lowercase() != "y" {
             return Ok(());
         };
-    }
+    };
 
     for index_key in index_keys {
         let index_val = index_map.remove(&index_key).unwrap();

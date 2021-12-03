@@ -30,7 +30,7 @@ pub fn encrypt_file(src: &str, dest: &str, password: &str) -> CryptoResult<()> {
     let secret_key = aead::SecretKey::from_slice(password.as_bytes())?;
     let data_raw = fs::read(src).unwrap();
     let data_enc = aead::seal(&secret_key, &data_raw)?;
-    utils::create_parent_dir(dest).unwrap();
+    fs::create_dir_all(utils::get_parent_dir(dest)).unwrap();
     fs::write(dest, data_enc).unwrap();
     Ok(())
 }
@@ -40,7 +40,7 @@ pub fn decrypt_file(src: &str, dest: &str, password: &str) -> CryptoResult<()> {
     let secret_key = aead::SecretKey::from_slice(password.as_bytes())?;
     let data_enc = fs::read(src).unwrap();
     let data_dec = aead::open(&secret_key, &data_enc)?;
-    utils::create_parent_dir(dest).unwrap();
+    fs::create_dir_all(utils::get_parent_dir(dest)).unwrap();
     fs::write(dest, data_dec).unwrap();
     Ok(())
 }

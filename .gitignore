@@ -2,6 +2,7 @@
 /target/
 
 # secret data for testing
+/unlock/
 /*.vlt
 
 # system cache

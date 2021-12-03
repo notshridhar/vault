@@ -39,5 +39,8 @@ Authenticated encryption is done using XChaCha20 and Poly1305 algorithms. The ke
 
 The inputs are never displayed or stored in the terminal, and the secret outputs are cleaned up on program end. However, if any secret is copied to clipboard, make sure it is cleaned after usage.
 
+## Known issues
+This program is not tested in, nor intended for windows as of now, so expect a lot of bugs there. Very specific assumptions of path delimiters are made in the entire program, which I'm too lazy to generalize unless there is a strong reason.
+
 ## Contributing
 Feel free to raise issues and create PR if you feel something is missing or could be made better.
