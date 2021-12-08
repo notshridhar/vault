@@ -186,6 +186,9 @@ fn utils_get_minimum_available_value() -> TestResult {
 
 #[test]
 fn crypto_kv() -> TestResult {
+    let _lock = FS_RESOURCE.lock()?;
+    setup_files()?;
+
     let map = HashMap::from([
         ("dir1/path1".to_string(), "001".to_string()),
         ("dir3/path1".to_string(), "004".to_string()),
@@ -193,16 +196,17 @@ fn crypto_kv() -> TestResult {
     ]);
 
     let password = "TestPass123";
-    let map_enc = crypto::encrypt_kv(&map, password)?;
-    let found_map = crypto::decrypt_kv(&map_enc, password)?;
+    let index_path = "unlock/index.vlt";
+    crypto::encrypt_kv(&map, index_path, password)?;
+    let found_map = crypto::decrypt_kv(index_path, password)?;
     assert_eq!(found_map.get("dir1/path1").unwrap(), "001");
     assert_eq!(found_map.get("dir3/path1").unwrap(), "004");
     assert_eq!(found_map.get("dir3/path2").unwrap(), "003");
 
     let password = "WrongPass";
-    crypto::decrypt_kv(&map_enc, password).unwrap_err();
+    crypto::decrypt_kv(index_path, password).unwrap_err();
 
-    Ok(())
+    clean_files()
 }
 
 #[test]
