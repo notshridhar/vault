@@ -29,6 +29,12 @@ fn setup_files() -> TestResult {
 
 fn clean_files() -> TestResult {
     fs::remove_dir_all("unlock")?;
+    for entry_res in fs::read_dir(".")? {
+        let entry_path = entry_res?.path();
+        if entry_path.is_file() && entry_path.ends_with(".vlt") {
+            fs::remove_file(entry_path)?;
+        };
+    }
     Ok(())
 }
 
@@ -56,16 +62,30 @@ fn utils_walk_dir() -> TestResult {
 }
 
 #[test]
+fn utils_list_files() -> TestResult {
+    let _lock = FS_RESOURCE.lock()?;
+    setup_files()?;
+
+    let found_paths = utils::list_files(Path::new("unlock"))?;
+    let found_files = found_paths
+        .iter()
+        .map(|path| path.to_str().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(found_files, ["unlock/file1"]);
+
+    clean_files()
+}
+
+#[test]
 fn utils_list_dirs() -> TestResult {
     let _lock = FS_RESOURCE.lock()?;
     setup_files()?;
 
     let found_paths = utils::list_dirs(Path::new("unlock"))?;
-    let mut found_dirs = found_paths
+    let found_dirs = found_paths
         .iter()
         .map(|path| path.to_str().unwrap())
         .collect::<Vec<_>>();
-    found_dirs.sort();
     assert_eq!(found_dirs, ["unlock/dir1"]);
 
     clean_files()

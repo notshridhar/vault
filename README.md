@@ -9,18 +9,12 @@ Because I like simple stuff with minimal BS.
 
 ## Usage
 ```sh
-vault set {namespace}::{path}
-vault rem {namespace}::{path}
-vault get {namespace}::{path}
+vault set {path}
+vault rem {path}
+vault get {path}
 ```
 
-Password will be prompted securely for both the operations. For the `set` operation, the secret value will also be prompted.
-
-Given password is used to encrypt the first secret for a given file and should be used for further operations on the same file.
-
-Setting the secret of a path empty will remove the path from storage.
-
-The encrypted secrets are written out to file(s) in the current working directory. The generated .vlt files are portable.
+Password will be prompted securely for both the operations. Given password is used to encrypt the first secret for a given file and should be used for further operations on the same file. The encrypted secrets are written out to file(s) in the current working directory. The generated .vlt files are portable.
 
 ## Building from source
 Rust needs to be installed ([link](https://www.rust-lang.org/tools/install)). In the project directory, run the following command -

@@ -26,6 +26,24 @@ pub fn walk_dir(path: &Path) -> io::Result<Vec<PathBuf>> {
     Ok(all_files)
 }
 
+pub fn list_files(path: &Path) -> io::Result<Vec<PathBuf>> {
+    let mut all_files = Vec::new();
+
+    let read_results = match fs::read_dir(path) {
+        Ok(res) => res,
+        Err(_err) => return Ok(Vec::new()),
+    };
+
+    for entry_res in read_results {
+        let entry_path = entry_res?.path();
+        if entry_path.is_file() {
+            all_files.push(entry_path);
+        };
+    }
+
+    Ok(all_files)
+}
+
 pub fn list_dirs(path: &Path) -> io::Result<Vec<PathBuf>> {
     let mut all_dirs = Vec::new();
 
@@ -52,21 +70,31 @@ pub fn get_parent_dir(path: &str) -> &str {
 pub fn get_matching_files(path: &str) -> io::Result<Vec<String>> {
     let mut matches = Vec::new();
 
-    let should_list = path.ends_with('*');
-    let should_list_all = path.ends_with("**");
-    let path = path.trim_end_matches('*');
-
-    let required_levels = path.matches('/').count();
-
-    for file_path in walk_dir(Path::new(get_parent_dir(path)))? {
-        let file_path = file_path.to_str().unwrap();
-        let is_equal = file_path == path;
-        let is_subpath = file_path.starts_with(path);
-        let is_child = file_path.matches('/').count() == required_levels;
-        if is_equal || (should_list && is_subpath && (should_list_all || is_child)) {
-            matches.push(file_path.to_string());
+    if path.ends_with("**") {
+        let path = path.strip_suffix("**").unwrap();
+        let path_parent = get_parent_dir(path);
+        for file_path in walk_dir(Path::new(path_parent))? {
+            let file_path_str = file_path.to_string_lossy();
+            if file_path_str.starts_with(path) {
+                matches.push(file_path_str.into_owned());
+            };
+        }
+    } else if path.ends_with('*') {
+        let path = path.strip_suffix('*').unwrap();
+        let path_parent = get_parent_dir(path);
+        for file_path in list_files(Path::new(path_parent))? {
+            let file_path_str = file_path.to_string_lossy();
+            if file_path_str.starts_with(path) {
+                matches.push(file_path_str.into_owned());
+            };
+        }
+    } else {
+        if let Ok(meta) = fs::metadata(path) {
+            if meta.is_file() {
+                matches.push(path.to_string());
+            };
         };
-    }
+    };
 
     Ok(matches)
 }
@@ -74,17 +102,22 @@ pub fn get_matching_files(path: &str) -> io::Result<Vec<String>> {
 pub fn get_matching_dirs(path: &str) -> io::Result<Vec<String>> {
     let mut matches = Vec::new();
 
-    let should_list = path.ends_with('*');
-    let path = path.trim_end_matches('*');
-
-    for dir_path in list_dirs(Path::new(get_parent_dir(path)))? {
-        let dir_path = dir_path.to_str().unwrap();
-        let is_equal = dir_path == path;
-        let is_subpath = dir_path.starts_with(path);
-        if is_equal || (should_list && is_subpath) {
-            matches.push(dir_path.to_string());
+    if path.ends_with('*') {
+        let path = path.strip_suffix('*').unwrap();
+        let path_parent = get_parent_dir(path);
+        for dir_path in list_dirs(Path::new(path_parent))? {
+            let dir_path_str = dir_path.to_string_lossy();
+            if dir_path_str.starts_with(path) {
+                matches.push(dir_path_str.into_owned());
+            };
+        }
+    } else {
+        if let Ok(meta) = fs::metadata(path) {
+            if meta.is_dir() {
+                matches.push(path.to_string());
+            };
         };
-    }
+    };
 
     Ok(matches)
 }
@@ -108,20 +141,26 @@ pub fn remove_matching_files(path: &str) -> io::Result<()> {
 pub fn get_matching_keys(map: &Dict, pat: &str) -> Vec<String> {
     let mut matches = Vec::new();
 
-    let should_list = pat.ends_with('*');
-    let should_list_all = pat.ends_with("**");
-    let pat = pat.trim_end_matches('*');
-
-    let required_levels = pat.matches('/').count();
-
-    for (key, _value) in map {
-        let is_equal = key == pat;
-        let is_subpath = key.starts_with(pat);
-        let is_child = key.matches('/').count() == required_levels;
-        if is_equal || (should_list && is_subpath && (should_list_all || is_child)) {
-            matches.push(key.to_string());
+    if pat.ends_with("**") {
+        let pat = pat.strip_suffix("**").unwrap();
+        for (key, _value) in map {
+            if key.starts_with(pat) {
+                matches.push(key.to_string());
+            };
+        }
+    } else if pat.ends_with('*') {
+        let pat = pat.strip_suffix('*').unwrap();
+        let pat_levels = pat.matches('/').count();
+        for (key, _value) in map {
+            if key.starts_with(pat) && key.matches('/').count() == pat_levels {
+                matches.push(key.to_string());
+            };
+        }
+    } else {
+        if map.contains_key(pat) {
+            matches.push(pat.to_string());
         };
-    }
+    };
 
     matches.sort();
 
