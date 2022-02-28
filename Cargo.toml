@@ -1,6 +1,6 @@
 [package]
 name = "vault"
-version = "0.1.0"
+version = "0.3.0"
 authors = ["shridhar hegde <shridhar.me.003@gmail.com>"]
 edition = "2021"
 

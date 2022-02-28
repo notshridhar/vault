@@ -50,3 +50,11 @@ pub fn decrypt_file(src: &str, dest: &str, password: &str) -> CryptoResult<()> {
     fs::write(dest, data_dec).unwrap();
     Ok(())
 }
+
+pub fn decrypt_file_content(src: &str, password: &str) -> CryptoResult<String> {
+    let password = format!("{:0>32}", password);
+    let secret_key = aead::SecretKey::from_slice(password.as_bytes())?;
+    let data_enc = fs::read(src).unwrap();
+    let data_dec = aead::open(&secret_key, &data_enc)?;
+    Ok(String::from_utf8(data_dec).unwrap())
+}

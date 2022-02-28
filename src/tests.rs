@@ -239,6 +239,9 @@ fn crypto_fs() -> TestResult {
     crypto::decrypt_file("unlock/file1_enc", "unlock/file1_dec", password)?;
     assert_eq!(fs::read_to_string("unlock/file1_dec")?, "contents1");
 
+    let contents = crypto::decrypt_file_content("unlock/file1_enc", password)?;
+    assert_eq!(contents, "contents1");
+
     let password = "WrongPass";
     crypto::decrypt_file("unlock/file1_enc", "unlock/fail", password).unwrap_err();
 

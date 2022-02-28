@@ -58,3 +58,24 @@ pub fn remove_secret(secret_path: &str, password: &str) -> VaultResult<()> {
 
     Ok(())
 }
+
+pub fn list_secrets(secret_path: &str, password: &str) -> VaultResult<()> {
+    let index_map = crypto::decrypt_kv("index.vlt", password)?;
+
+    for index_key in utils::get_matching_keys(&index_map, secret_path) {
+        println!("- {}", index_key);
+    }
+
+    Ok(())
+}
+
+pub fn show_secret(secret_path: &str, password: &str) -> VaultResult<()> {
+    let index_map = crypto::decrypt_kv("index.vlt", password)?;
+    if let Some(index_val) = index_map.get(secret_path) {
+        let lock_file = format!("{:0>3}.vlt", &index_val);
+        let file_content = crypto::decrypt_file_content(&lock_file, password)?;
+        println!("{}", file_content);
+    }
+
+    Ok(())
+}

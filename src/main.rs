@@ -27,13 +27,20 @@ fn main_app() -> VaultResult<()> {
         "get" => engine::get_secret(&secret_path, &password),
         "set" => engine::set_secret(&secret_path, &password),
         "rem" => engine::remove_secret(&secret_path, &password),
+        "list" => engine::list_secrets(&secret_path, &password),
+        "show" => engine::show_secret(&secret_path, &password),
         _ => Err(VaultError::InvalidCommand),
+    }?;
+
+    if command.len() == 3 {
+        println!("success");
     }
+
+    Ok(())
 }
 
 fn main() -> () {
-    match main_app() {
-        Ok(_res) => println!("success"),
-        Err(err) => eprintln!("failure: {}", err)
+    if let Err(err) = main_app() {
+        eprintln!("failure: {}", err);
     }
 }
