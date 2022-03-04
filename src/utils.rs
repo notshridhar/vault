@@ -143,7 +143,7 @@ pub fn get_matching_keys(map: &Dict, pat: &str) -> Vec<String> {
 
     if pat.ends_with("**") {
         let pat = pat.strip_suffix("**").unwrap();
-        for (key, _value) in map {
+        for key in map.keys() {
             if key.starts_with(pat) {
                 matches.push(key.to_string());
             };
@@ -151,7 +151,7 @@ pub fn get_matching_keys(map: &Dict, pat: &str) -> Vec<String> {
     } else if pat.ends_with('*') {
         let pat = pat.strip_suffix('*').unwrap();
         let pat_levels = pat.matches('/').count();
-        for (key, _value) in map {
+        for key in map.keys() {
             if key.starts_with(pat) && key.matches('/').count() == pat_levels {
                 matches.push(key.to_string());
             };

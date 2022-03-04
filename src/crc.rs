@@ -25,10 +25,10 @@ fn write_crc_file(map: &CrcDict) -> () {
     fs::write(crc_file_path, contents).unwrap();
 }
 
-fn compute_crc(path: &str) -> CrcDict {
+fn compute_crc() -> CrcDict {
     let mut result = HashMap::new();
 
-    let lock_files = format!("{}/{}", LOCK_DIR, path);
+    let lock_files = format!("{}/**", LOCK_DIR);
     for lock_file in utils::get_matching_files(&lock_files).unwrap() {
         let file_name = lock_file.split_once('/').unwrap().1;
         let file_index_str = file_name.split_once('.').unwrap().0;
@@ -42,9 +42,9 @@ fn compute_crc(path: &str) -> CrcDict {
     result
 }
 
-pub fn check_crc(path: &str) -> VaultResult<()> {
+pub fn check_crc() -> VaultResult<()> {
     let stored_crc = read_crc_file();
-    let computed_crc = compute_crc(path);
+    let computed_crc = compute_crc();
 
     for stored_key in stored_crc.keys() {
         if !computed_crc.contains_key(stored_key) {
@@ -72,5 +72,5 @@ pub fn check_crc(path: &str) -> VaultResult<()> {
 }
 
 pub fn update_crc() -> VaultResult<()> {
-    Ok(write_crc_file(&compute_crc("**")))
+    Ok(write_crc_file(&compute_crc()))
 }

@@ -67,7 +67,7 @@ fn main_app() -> VaultResult<()> {
         "rem" => engine::remove_secret(&secret_path, &password),
         "list" => engine::list_secrets(&secret_path, &password),
         "show" => engine::show_secret(&secret_path, &password),
-        "crc-check" => engine::check_crc(&secret_path),
+        "crc-check" => engine::check_crc(),
         "crc-update" => engine::update_crc(),
         _ => Err(VaultError::InvalidCommand),
     }?;

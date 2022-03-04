@@ -8,7 +8,7 @@ use std::fs;
 type VaultResult<T> = Result<T, VaultError>;
 
 pub fn get_secret(secret_path: &str, password: &str) -> VaultResult<()> {
-    crc::check_crc(secret_path)?;
+    crc::check_crc()?;
 
     let index_file_path = format!("{}/index.vlt", LOCK_DIR);
     let index_map = crypto::decrypt_kv(&index_file_path, password)?;
@@ -25,8 +25,8 @@ pub fn get_secret(secret_path: &str, password: &str) -> VaultResult<()> {
 }
 
 pub fn set_secret(secret_path: &str, password: &str) -> VaultResult<()> {
-    crc::check_crc(secret_path)?;
-    
+    crc::check_crc()?;
+
     let index_file_path = format!("{}/index.vlt", LOCK_DIR);
     let mut index_map = crypto::decrypt_kv(&index_file_path, password)?;
 
@@ -55,8 +55,8 @@ pub fn set_secret(secret_path: &str, password: &str) -> VaultResult<()> {
 }
 
 pub fn remove_secret(secret_path: &str, password: &str) -> VaultResult<()> {
-    crc::check_crc(secret_path)?;
-    
+    crc::check_crc()?;
+
     let index_file_path = format!("{}/index.vlt", LOCK_DIR);
     let mut index_map = crypto::decrypt_kv(&index_file_path, password)?;
 
@@ -69,13 +69,13 @@ pub fn remove_secret(secret_path: &str, password: &str) -> VaultResult<()> {
     }
 
     crypto::encrypt_kv(&index_map, &index_file_path, password).unwrap();
-    
+
     crc::update_crc()
 }
 
 pub fn list_secrets(secret_path: &str, password: &str) -> VaultResult<()> {
-    crc::check_crc(secret_path)?;
-    
+    crc::check_crc()?;
+
     let index_file_path = format!("{}/index.vlt", LOCK_DIR);
     let index_map = crypto::decrypt_kv(&index_file_path, password)?;
 
@@ -87,7 +87,7 @@ pub fn list_secrets(secret_path: &str, password: &str) -> VaultResult<()> {
 }
 
 pub fn show_secret(secret_path: &str, password: &str) -> VaultResult<()> {
-    crc::check_crc(secret_path)?;
+    crc::check_crc()?;
 
     let index_file_path = format!("{}/index.vlt", LOCK_DIR);
     let index_map = crypto::decrypt_kv(&index_file_path, password)?;
@@ -101,8 +101,8 @@ pub fn show_secret(secret_path: &str, password: &str) -> VaultResult<()> {
     Ok(())
 }
 
-pub fn check_crc(path: &str) -> VaultResult<()> {
-    crc::check_crc(path)?;
+pub fn check_crc() -> VaultResult<()> {
+    crc::check_crc()?;
     println!("success");
     Ok(())
 }
