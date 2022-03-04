@@ -5,6 +5,7 @@ authors = ["shridhar hegde <shridhar.me.003@gmail.com>"]
 edition = "2021"
 
 [dependencies]
+crc = "2.1"
 once_cell = "1.8"
 orion = "0.16"
 rpassword = "5.0"

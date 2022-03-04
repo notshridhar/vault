@@ -4,16 +4,16 @@ use std::fmt;
 #[derive(Debug)]
 pub enum VaultError {
     InvalidCommand,
-    InvalidPath,
     IncorrectPassword,
+    CrcMismatch(String),
 }
 
 impl fmt::Display for VaultError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             VaultError::InvalidCommand => write!(f, "invalid command"),
-            VaultError::InvalidPath => write!(f, "invalid path"),
             VaultError::IncorrectPassword => write!(f, "incorrect password"),
+            VaultError::CrcMismatch(e) => write!(f, "crc mismatch - {}", &e),
         }
     }
 }

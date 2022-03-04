@@ -15,6 +15,9 @@ vault get {path}
 
 vault list {path}
 vault show {path}
+
+vault crc-check {path}
+vault crc-update
 ```
 
 Password will be prompted securely for both the operations. Given password is used to encrypt the first secret for a given file and should be used for further operations on the same file. The encrypted secrets are written out to file(s) in the current working directory. The generated .vlt files are portable.
