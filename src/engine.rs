@@ -9,7 +9,7 @@ type VaultResult<T> = Result<T, VaultError>;
 
 pub fn get_secret(secret_path: &str, password: &str) -> VaultResult<()> {
     crc::check_crc()?;
-
+    
     let index_file_path = format!("{}/index.vlt", LOCK_DIR);
     let index_map = crypto::decrypt_kv(&index_file_path, password)?;
 
@@ -74,8 +74,6 @@ pub fn remove_secret(secret_path: &str, password: &str) -> VaultResult<()> {
 }
 
 pub fn list_secrets(secret_path: &str, password: &str) -> VaultResult<()> {
-    crc::check_crc()?;
-
     let index_file_path = format!("{}/index.vlt", LOCK_DIR);
     let index_map = crypto::decrypt_kv(&index_file_path, password)?;
 
@@ -87,8 +85,6 @@ pub fn list_secrets(secret_path: &str, password: &str) -> VaultResult<()> {
 }
 
 pub fn show_secret(secret_path: &str, password: &str) -> VaultResult<()> {
-    crc::check_crc()?;
-
     let index_file_path = format!("{}/index.vlt", LOCK_DIR);
     let index_map = crypto::decrypt_kv(&index_file_path, password)?;
 
