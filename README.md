@@ -1,4 +1,4 @@
-![vault_logo](images/logo.png)
+<img src="images/logo.png" width="100%">
 
 <hr>
 
