@@ -1,8 +1,14 @@
 mod args;
+mod constants;
+mod crc;
 mod secret;
 mod util;
+mod zip;
 
+use chrono::offset::Local;
 use crate::args::{ParsedArgs, ParserError};
+use crate::constants::LOCK_DIR;
+use crate::crc::CrcMismatchError;
 use crate::secret::SecretError;
 use rpassword;
 use serde_json;
@@ -19,9 +25,12 @@ fn prompt_password() -> String {
 fn main_app() -> Result<(), VaultCliError> {
     let args_list = std::env::args().collect::<Vec<_>>();
     let args = ParsedArgs::from_args(&args_list);
-    if args.get_index(0).is_none() && args.get_value("help").is_some() {
-        // prints help
-        // fucking leaves
+    if args.get_index(1).is_none() {
+        if args.get_value("version").is_some() {
+            // prints version
+        } else if args.get_value("help").is_some() {
+            // prints help
+        }
     }
 
     let json_result = match args.expect_index(1, "command")? {
@@ -37,7 +46,8 @@ fn main_app() -> Result<(), VaultCliError> {
         }
         "set" => {
             let path = args.expect_index(2, "secret_path")?;
-            let contents = args.expect_index(3, "contents")?;
+            let contents_raw = args.expect_index(3, "contents")?;
+            let contents = &contents_raw.replace("\\n", "\n");
             let password = args.get_value("password").map_or_else(
                 prompt_password, |pass| pass.to_owned());
             let info = secret::set_secret(path, contents, &password)?;
@@ -63,10 +73,16 @@ fn main_app() -> Result<(), VaultCliError> {
         }
         "crc" => {
             if args.get_value("force-update").is_some() {
-                secret::update_crc_all()?;
+                crc::update_crc_all()
             } else {
-                secret::check_crc_all()?;
+                crc::check_crc_all()?;
             }
+            "{}".to_owned()
+        }
+        "zip" => {
+            let date_stamp = Local::now().format("%Y%m%d");
+            let archive_name = format!("vault-{}.zip", date_stamp);
+            zip::zip_dirs(&archive_name, &[LOCK_DIR, "vault"]).unwrap();
             "{}".to_owned()
         }
         _ => Err(ParserError::Invalid { key: "command".to_owned() })?
@@ -95,6 +111,15 @@ impl From<ParserError> for VaultCliError {
                 ("key".to_owned(), key),
             ]),
         }
+    }
+}
+
+impl From<CrcMismatchError> for VaultCliError {
+    fn from(error: CrcMismatchError) -> Self {
+        Self::from([
+            ("error".to_owned(), "crc_mismatch".to_owned()),
+            ("index".to_owned(), error.index.to_string()),
+        ])
     }
 }
 

@@ -1,6 +1,9 @@
 # target files
 /target/
 
+# cargo
+/Cargo.lock
+
 # secret data for testing
 /vault-lock/
 /vault-unlock/

@@ -1,18 +1,12 @@
+use crate::constants::LOCK_DIR;
+use crate::crc::{self, CrcMismatchError};
 use crate::util::VecExt;
-use crc::{Crc, CRC_32_ISCSI};
 use orion::aead;
 use orion::errors::UnknownCryptoError;
 use serde::Serialize;
 use serde_json;
-use std::collections::hash_map::HashMap;
-use std::collections::hash_set::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io;
-
-pub const LOCK_DIR: &'static str = "vault-lock";
-pub const _UNLOCK_DIR: &'static str = "vault-unlock";
-
-const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 fn encrypt(
     data: &[u8], password: &str
@@ -78,75 +72,6 @@ fn remove_encrypted_file(index: u16) -> () {
     fs::remove_file(file_enc).unwrap()
 }
 
-fn compute_crc(file_path: &str) -> io::Result<u32> {
-    let file_content = fs::read(file_path)?;
-    Ok(CRC32.checksum(&file_content))
-}
-
-fn compute_crc_all() -> HashMap<u16, u32> {
-    if let Ok(dir_entries) = fs::read_dir(LOCK_DIR) {
-        dir_entries.fold(HashMap::new(), |mut accum, entry| {
-            let lock_file = entry.unwrap();
-            let file_name = lock_file.file_name().into_string().unwrap();
-            let file_index_str = file_name.split_once('.').unwrap().0;
-            if let Ok(file_index) = file_index_str.parse::<u16>() {
-                let file_content = fs::read(lock_file.path()).unwrap();
-                let checksum = CRC32.checksum(&file_content);
-                accum.insert(file_index, checksum);
-            }
-            accum
-        })
-    } else {
-        HashMap::new()
-    }
-}
-
-fn read_crc_file() -> HashMap<u16, u32> {
-    let crc_file = format!("{}/index.crc", LOCK_DIR);
-    if let Ok(contents) = fs::read_to_string(&crc_file) {
-        serde_json::from_str(&contents).unwrap()
-    } else {
-        HashMap::new()
-    }
-}
-
-fn write_crc_file(crc_map: &HashMap<u16, u32>) -> () {
-    let crc_file = format!("{}/index.crc", LOCK_DIR);
-    let contents = serde_json::to_string(crc_map).unwrap();
-    fs::create_dir_all(LOCK_DIR).unwrap();
-    fs::write(crc_file, contents).unwrap()
-}
-
-fn check_crc(file_index: &u16) -> Result<u32, SecretError> {
-    let file_path = format!("{}/{:0>3}.vlt", LOCK_DIR, file_index);
-    let stored_crc_all = read_crc_file();
-    let error = SecretError::CrcMismatch { index: file_index.to_owned() };
-    if let Ok(computed_crc) = compute_crc(&file_path) {
-        if let Some(stored_crc) = stored_crc_all.get(file_index) {
-            if stored_crc == &computed_crc {
-                Ok(computed_crc)
-            } else {
-                Err(error)
-            }
-        } else {
-            Err(error)
-        }
-    } else {
-        Err(error)
-    }
-}
-
-fn update_crc(file_index: &u16) -> () {
-    let file_path = format!("{}/{:0>3}.vlt", LOCK_DIR, file_index);
-    let mut stored_crc_all = read_crc_file();
-    if let Ok(computed_crc) = compute_crc(&file_path) {
-        stored_crc_all.insert(file_index.to_owned(), computed_crc);
-    } else {
-        stored_crc_all.remove(file_index);
-    }
-    write_crc_file(&stored_crc_all);
-}
-
 fn reserve_index(
     index_map: &mut HashMap<String, String>, secret_path: &str
 ) -> u16 {
@@ -166,7 +91,7 @@ pub fn get_secret(
     let index_map = read_index_file(password)?;
     if let Some(index_value) = index_map.get(secret_path) {
         let file_index = index_value.parse::<u16>().unwrap();
-        check_crc(&file_index)?;
+        crc::check_crc(&file_index)?;
         let contents = read_encrypted_file(file_index, password)?;
         Ok(SecretInfo { path: secret_path.to_owned(), contents })
     } else {
@@ -186,7 +111,7 @@ pub fn set_secret(
         file_index
     };
     write_encrypted_file(file_index, contents, password)?;
-    update_crc(&file_index);
+    crc::update_crc(&file_index);
     Ok(SecretInfo {
         path: secret_path.to_owned(),
         contents: contents.to_owned(),
@@ -202,7 +127,7 @@ pub fn remove_secret(
         index_map.remove(secret_path).unwrap();
         write_index_file(&index_map, password)?;
         remove_encrypted_file(file_index);
-        update_crc(&file_index);
+        crc::update_crc(&file_index);
         Ok(SecretInfo {
             path: secret_path.to_owned(),
             contents: String::new()
@@ -249,44 +174,6 @@ pub fn list_secret_paths_recursive(
     ))
 }
 
-pub fn check_crc_all() -> Result<HashMap<u16, u32>, SecretError> {
-    let stored_crc = read_crc_file();
-    let computed_crc = compute_crc_all();
-
-    let added_errors = computed_crc.keys()
-        .filter(|computed_key| !stored_crc.contains_key(computed_key))
-        .map(|computed_key| SecretError::CrcMismatch {
-            index: computed_key.to_owned(),
-        });
-
-    let removed_errors = stored_crc.keys()
-        .filter(|stored_key| !computed_crc.contains_key(stored_key))
-        .map(|stored_key| SecretError::CrcMismatch {
-            index: stored_key.to_owned(),
-        });
-
-    let diff_errors = stored_crc.keys()
-        .filter(|stored_key| {
-            let stored_value = stored_crc.get(stored_key).unwrap();
-            computed_crc.get(stored_key)
-                .map(|computed_value| computed_value != stored_value)
-                .unwrap_or(false)
-        })
-        .map(|stored_key| SecretError::CrcMismatch {
-            index: stored_key.to_owned(),
-        });
-
-    match added_errors.chain(removed_errors).chain(diff_errors).next() {
-        Some(err) => Err(err),
-        None => Ok(computed_crc),
-    }
-}
-
-pub fn update_crc_all() -> Result<(), SecretError> {
-    let computed_crc = compute_crc_all();
-    Ok(write_crc_file(&computed_crc))
-}
-
 #[derive(Debug, PartialEq, Serialize)]
 pub struct SecretInfo {
     pub path: String,
@@ -298,6 +185,12 @@ pub enum SecretError {
     CrcMismatch { index: u16 },
     IncorrectPassword,
     NonExistentPath,
+}
+
+impl From<CrcMismatchError> for SecretError {
+    fn from(error: CrcMismatchError) -> Self {
+        Self::CrcMismatch { index: error.index }
+    }
 }
 
 impl From<UnknownCryptoError> for SecretError {

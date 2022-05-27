@@ -12,18 +12,6 @@ CLI Usage
 set-file {path-glob} -> json::list<matched paths>
 get-file {path-glob} -> json::list<matched paths>
 
-get {path} -> info
-set {path} {text-content} -> status
-
-list {path-glob} -> json::list<matched paths>
-remove {path-glob} -> json::list<matched paths>
-
 Backup Operations
 -----------------
-verify-crc {path-glob} -> status
-update-crc {path-glob} -> status
 pack -> json::status (append in a linear fashion, maybe)
-
-TODO:
-test all operations
-verify appropriate errors
