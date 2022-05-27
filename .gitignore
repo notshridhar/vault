@@ -2,8 +2,8 @@
 /target/
 
 # secret data for testing
-/unlock/
-/*.vlt
+/vault-lock/
+/vault-unlock/
 
 # system cache
 .DS_Store

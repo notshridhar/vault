@@ -1,82 +1,116 @@
-mod constants;
-mod crc;
-mod crypto;
-mod engine;
-mod error;
-mod utils;
+mod args;
+mod secret;
+mod util;
 
-#[cfg(test)]
-mod tests;
-
-use crate::error::VaultError;
+use crate::args::{ParsedArgs, ParserError};
+use crate::secret::SecretError;
 use rpassword;
-use std::env;
-use std::io::{self, Write};
-use std::path::Path;
+use serde_json;
+use std::collections::HashMap;
+use std::io::Write;
 
-type VaultResult<T> = Result<T, VaultError>;
+fn prompt_password() -> String {
+    let pass = rpassword::prompt_password_stdout("password:").unwrap();
+    print!("\x1b[1A\x1b[2K");
+    std::io::stdout().flush().unwrap();
+    pass
+}
 
-fn main_app() -> VaultResult<()> {
-    let mut args = env::args();
-    let _app_path = args.next().ok_or(VaultError::InvalidCommand)?;
-    let command = args.next().ok_or(VaultError::InvalidCommand)?;
-    let secret_path = args.next().ok_or(VaultError::InvalidCommand)?;
-    let mut password = String::new();
-    let mut current_dir = String::new();
+fn main_app() -> Result<(), VaultCliError> {
+    let args_list = std::env::args().collect::<Vec<_>>();
+    let args = ParsedArgs::from_args(&args_list);
+    if args.get_index(0).is_none() && args.get_value("help").is_some() {
+        // prints help
+        // fucking leaves
+    }
 
-    let mut capture_password = false;
-    let mut capture_current_dir = false;
-    for current_arg in args {
-        if capture_password {
-            password = current_arg;
-            capture_password = false;
-        } else if capture_current_dir {
-            current_dir = current_arg;
-            capture_current_dir = false;
-        } else if current_arg == "--password" {
-            capture_password = true;
-        } else if current_arg == "--current-dir" {
-            capture_current_dir = true;
-        } else if current_arg.starts_with("--password=") {
-            password = current_arg.split_once('=').unwrap().1.to_string();
-        } else if current_arg.starts_with("--current-dir=") {
-            current_dir = current_arg.split_once('=').unwrap().1.to_string();
-        } else {
-            Err(VaultError::InvalidCommand)?;
+    let json_result = match args.expect_index(1, "command")? {
+        // "login" => { /* login */ }
+        // "get-file" => { /* write to unencrypted file */ },
+        // "set-file" => { /* set from unencrypted file */ },
+        "get" => {
+            let path = args.expect_index(2, "secret_path")?;
+            let password = args.get_value("password").map_or_else(
+                prompt_password, |pass| pass.to_owned());
+            let info = secret::get_secret(path, &password)?;
+            serde_json::to_string(&info).unwrap()
         }
-    }
-
-    if capture_password || capture_current_dir {
-        Err(VaultError::InvalidCommand)?;
-    }
-
-    if !command.starts_with("crc-") && password.is_empty() {
-        password = rpassword::prompt_password_stdout("password: ").unwrap();
-        print!("\x1b[1A\x1b[2K");
-        io::stdout().flush().unwrap();
-    }
-
-    if !current_dir.is_empty() {
-        let current_dir_path = Path::new(&current_dir);
-        env::set_current_dir(current_dir_path).unwrap();
+        "set" => {
+            let path = args.expect_index(2, "secret_path")?;
+            let contents = args.expect_index(3, "contents")?;
+            let password = args.get_value("password").map_or_else(
+                prompt_password, |pass| pass.to_owned());
+            let info = secret::set_secret(path, contents, &password)?;
+            serde_json::to_string(&info).unwrap()
+        }
+        "rm" => {
+            let path = args.expect_index(2, "secret_path")?;
+            let password = args.get_value("password").map_or_else(
+                prompt_password, |pass| pass.to_owned());
+            let info = secret::remove_secret(path, &password)?;
+            serde_json::to_string(&info).unwrap()
+        }
+        "ls" => {
+            let pattern = args.get_index(2).unwrap_or("");
+            let password = args.get_value("password").map_or_else(
+                prompt_password, |pass| pass.to_owned());
+            let info = if args.get_value("recursive").is_some() {
+                secret::list_secret_paths_recursive(pattern, &password)
+            } else {
+                secret::list_secret_paths(pattern, &password)                
+            }?;
+            serde_json::to_string(&info).unwrap()
+        }
+        "crc" => {
+            if args.get_value("force-update").is_some() {
+                secret::update_crc_all()?;
+            } else {
+                secret::check_crc_all()?;
+            }
+            "{}".to_owned()
+        }
+        _ => Err(ParserError::Invalid { key: "command".to_owned() })?
     };
 
-    match command.as_str() {
-        "get" => engine::get_secret(&secret_path, &password),
-        "set" => engine::set_secret(&secret_path, &password),
-        "rem" => engine::remove_secret(&secret_path, &password),
-        "list" => engine::list_secrets(&secret_path, &password),
-        "show" => engine::show_secret(&secret_path, &password),
-        "crc-check" => engine::check_crc(),
-        "crc-update" => engine::update_crc(),
-        _ => Err(VaultError::InvalidCommand),
-    }?;
-
-    Ok(())
+    Ok(println!("{}", json_result))
 }
 
 fn main() -> () {
     if let Err(err) = main_app() {
-        eprintln!("failure: {}", err);
+        eprintln!("{}", serde_json::to_string(&err).unwrap());
+    }
+}
+
+pub type VaultCliError = HashMap<String, String>;
+
+impl From<ParserError> for VaultCliError {
+    fn from(error: ParserError) -> Self {
+        match error {
+            ParserError::Missing { key } => Self::from([
+                ("error".to_owned(), "arg_missing".to_owned()),
+                ("key".to_owned(), key),
+            ]),
+            ParserError::Invalid { key } => Self::from([
+                ("error".to_owned(), "arg_invalid".to_owned()),
+                ("key".to_owned(), key),
+            ]),
+        }
+    }
+}
+
+impl From<SecretError> for VaultCliError {
+    fn from(error: SecretError) -> Self {
+        match error {
+            SecretError::CrcMismatch { index } => Self::from([
+                ("error".to_owned(), "crc_mismatch".to_owned()),
+                ("index".to_owned(), index.to_string()),
+            ]),
+            SecretError::IncorrectPassword => Self::from([
+                ("error".to_owned(), "incorrect_password".to_owned()),
+            ]),
+            SecretError::NonExistentPath => Self::from([
+                ("error".to_owned(), "non_existent_path".to_owned()),
+            ]),
+        }
     }
 }

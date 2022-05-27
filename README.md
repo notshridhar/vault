@@ -1,7 +1,5 @@
 <img src="images/logo.png" width="100%">
 
-<hr>
-
 A simple and lightweight vault for secret storage written in Rust.
 
 ## Why?
@@ -9,15 +7,12 @@ Because I like simple stuff with minimal BS.
 
 ## Usage
 ```sh
-vault set {path}
-vault rem {path}
 vault get {path}
+vault set {path}
+vault rm {path}
+vault ls {path}
 
-vault list {path}
-vault show {path}
-
-vault crc-check {path}
-vault crc-update
+vault crc [--force-update]
 ```
 
 Password will be prompted securely for both the operations. Given password is used to encrypt the first secret for a given file and should be used for further operations on the same file. The encrypted secrets are written out to file(s) in the current working directory. The generated .vlt files are portable.
