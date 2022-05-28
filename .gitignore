@@ -2,7 +2,7 @@
 /target/
 
 # cargo
-/Cargo.lock
+Cargo.lock
 
 # secret data for testing
 /vault-lock/

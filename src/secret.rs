@@ -87,13 +87,13 @@ fn reserve_index(
 
 pub fn get_secret(
     secret_path: &str, password: &str
-) -> Result<SecretInfo, SecretError> {
+) -> Result<String, SecretError> {
     let index_map = read_index_file(password)?;
     if let Some(index_value) = index_map.get(secret_path) {
         let file_index = index_value.parse::<u16>().unwrap();
         crc::check_crc(&file_index)?;
         let contents = read_encrypted_file(file_index, password)?;
-        Ok(SecretInfo { path: secret_path.to_owned(), contents })
+        Ok(contents)
     } else {
         Err(SecretError::NonExistentPath)
     }
@@ -101,7 +101,7 @@ pub fn get_secret(
 
 pub fn set_secret(
     secret_path: &str, contents: &str, password: &str
-) -> Result<SecretInfo, SecretError> {
+) -> Result<String, SecretError> {
     let mut index_map = read_index_file(password)?;
     let file_index = if let Some(index_value) = index_map.get(secret_path) {
         index_value.parse::<u16>().unwrap()
@@ -112,15 +112,12 @@ pub fn set_secret(
     };
     write_encrypted_file(file_index, contents, password)?;
     crc::update_crc(&file_index);
-    Ok(SecretInfo {
-        path: secret_path.to_owned(),
-        contents: contents.to_owned(),
-    })
+    Ok(contents.to_owned())
 }
 
 pub fn remove_secret(
     secret_path: &str, password: &str
-) -> Result<SecretInfo, SecretError> {
+) -> Result<(), SecretError> {
     let mut index_map = read_index_file(password)?;
     if let Some(index_value) = index_map.get(secret_path) {
         let file_index = index_value.parse::<u16>().unwrap();
@@ -128,10 +125,7 @@ pub fn remove_secret(
         write_index_file(&index_map, password)?;
         remove_encrypted_file(file_index);
         crc::update_crc(&file_index);
-        Ok(SecretInfo {
-            path: secret_path.to_owned(),
-            contents: String::new()
-        })
+        Ok(())
     } else {
         Err(SecretError::NonExistentPath)
     }
@@ -139,7 +133,7 @@ pub fn remove_secret(
 
 pub fn list_secret_paths(
     pattern: &str, password: &str
-) -> Result<Vec<SecretInfo>, SecretError> {
+) -> Result<Vec<String>, SecretError> {
     let index_map = read_index_file(password)?;
     let key_set = HashSet::<String>::from_iter(index_map
         .into_keys()
@@ -151,27 +145,16 @@ pub fn list_secret_paths(
                 + if key_levels == pat_levels { "" } else { "/" }
         })
     );
-    Ok(Vec::from_iter(key_set
-        .into_iter()
-        .map(|key| SecretInfo {
-            path: key,
-            contents: String::new()
-        })
-    ))
+    Ok(Vec::from_iter(key_set.into_iter()))
 }
 
 pub fn list_secret_paths_recursive(
     pattern: &str, password: &str
-) -> Result<Vec<SecretInfo>, SecretError> {
+) -> Result<Vec<String>, SecretError> {
     let index_map = read_index_file(password)?;
-    Ok(Vec::from_iter(index_map
-        .into_keys()
-        .filter(|key| key.starts_with(pattern))
-        .map(|key| SecretInfo {
-            path: key,
-            contents: String::new()
-        })
-    ))
+    let key_iter = index_map.into_keys()
+        .filter(|key| key.starts_with(pattern));
+    Ok(Vec::from_iter(key_iter))
 }
 
 #[derive(Debug, PartialEq, Serialize)]
@@ -225,9 +208,8 @@ mod test {
         let lock = DIR_LOCK.lock().unwrap();
         let (test_path, test_val, test_pass) = ("dir1/fil1", "cont1", "1234");
         super::set_secret(test_path, test_val, test_pass).unwrap();
-        let found = super::get_secret(test_path, test_pass).unwrap();
-        assert_eq!(found.path, test_path);
-        assert_eq!(found.contents, test_val);
+        let contents = super::get_secret(test_path, test_pass).unwrap();
+        assert_eq!(contents, test_val);
         super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
         drop(lock);
     }
@@ -259,9 +241,8 @@ mod test {
         let lock = DIR_LOCK.lock().unwrap();
         let (test_path, test_val, test_pass) = ("dir1/fil1", "cont1", "1234");
         super::set_secret(test_path, test_val, test_pass).unwrap();
-        let found = super::get_secret(test_path, test_pass).unwrap();
-        assert_eq!(found.path, test_path);
-        assert_eq!(found.contents, test_val);
+        let contents = super::get_secret(test_path, test_pass).unwrap();
+        assert_eq!(contents, test_val);
         super::remove_secret(test_path, test_pass).unwrap();
         let error = super::get_secret(test_path, test_pass).unwrap_err();
         assert_eq!(error, super::SecretError::NonExistentPath);
@@ -286,11 +267,9 @@ mod test {
         super::set_secret("dir1/fil2", "cont2", "1234").unwrap();
         super::set_secret("dir1/sdir/fil3", "cont4", "1234").unwrap();
         super::set_secret("dir2/fil1", "cont3", "1234").unwrap();
-        let list = super::list_secret_paths("dir1/", "1234").unwrap();
-        assert_eq!(
-            list.into_iter().map(|x| x.path).collect::<Vec<_>>().into_sorted(),
-            ["dir1/fil1", "dir1/fil2", "dir1/sdir/"]
-        );
+        let list = super::list_secret_paths("dir1/", "1234").unwrap()
+            .into_sorted();
+        assert_eq!(list, ["dir1/fil1", "dir1/fil2", "dir1/sdir/"]);
         super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
         drop(lock);
     }
@@ -302,11 +281,9 @@ mod test {
         super::set_secret("dir1/fil2", "cont2", "1234").unwrap();
         super::set_secret("dir1/sdir/fil3", "cont4", "1234").unwrap();
         super::set_secret("dir2/fil1", "cont3", "1234").unwrap();
-        let ls = super::list_secret_paths_recursive("dir1/", "1234").unwrap();
-        assert_eq!(
-            ls.into_iter().map(|x| x.path).collect::<Vec<_>>().into_sorted(),
-            ["dir1/fil1", "dir1/fil2", "dir1/sdir/fil3"]
-        );
+        let list = super::list_secret_paths_recursive("dir1/", "1234").unwrap()
+            .into_sorted();
+        assert_eq!(list, ["dir1/fil1", "dir1/fil2", "dir1/sdir/fil3"]);
         super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
         drop(lock);
     }

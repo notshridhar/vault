@@ -55,14 +55,46 @@ impl ParsedArgs {
     ) -> Result<&str, ParserError> {
         self.options.get(&index.to_string())
             .map(|x| x.as_str())
-            .ok_or(ParserError::Missing { key: key.to_owned() })
+            .ok_or(ParserError::missing_value(key))
+    }
+
+    pub fn expect_no_unrecognized(
+        &self, unrecognized_index: u16, recognized_keys: &[&str]
+    ) -> Result<(), ParserError> {
+        if self.options.contains_key(&unrecognized_index.to_string()) {
+            Err(ParserError::TooManyIndexed)
+        } else {
+            self.options
+                .keys()
+                .filter(|key| key.parse::<u16>().is_err()
+                    && !recognized_keys.contains(&key.as_str()))
+                .map(|key| ParserError::invalid_key(key))
+                .next()
+                .map_or(Ok(()), |err| Err(err))
+        }
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub enum ParserError {
-    Missing { key: String },
-    Invalid { key: String },
+    TooManyIndexed,
+    InvalidKey { key: String },
+    MissingValue { key: String },
+    InvalidValue { key: String },
+}
+
+impl ParserError {
+    pub fn invalid_key(key: &str) -> Self {
+        Self::InvalidKey { key: key.to_owned() }
+    }
+
+    pub fn missing_value(key: &str) -> Self {
+        Self::MissingValue { key: key.to_owned() }
+    }
+
+    pub fn invalid_value(key: &str) -> Self {
+        Self::InvalidValue { key: key.to_owned() }
+    }
 }
 
 #[cfg(test)]
@@ -87,8 +119,8 @@ mod test {
         assert_eq!(args.get_index(2), None);
         assert_eq!(args.get_value("key"), Some("val"));
         assert_eq!(args.get_value("val"), None);
-        let error = Err(super::ParserError::Missing { key: "key".to_owned() });
-        assert_eq!(args.expect_index(2, "key"), error);
+        let error = super::ParserError::missing_value("key");
+        assert_eq!(args.expect_index(2, "key"), Err(error));
         
     }
 

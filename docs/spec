@@ -11,7 +11,3 @@ CLI Usage
 ---------
 set-file {path-glob} -> json::list<matched paths>
 get-file {path-glob} -> json::list<matched paths>
-
-Backup Operations
------------------
-pack -> json::status (append in a linear fashion, maybe)
