@@ -1,99 +1,55 @@
-use crate::constants::LOCK_DIR;
+use crate::constants::{LOCK_DIR, UNLOCK_DIR};
 use crate::crc::{self, CrcMismatchError};
+use crate::crypto;
+use crate::glob;
 use crate::util::VecExt;
-use orion::aead;
 use orion::errors::UnknownCryptoError;
-use serde::Serialize;
-use serde_json;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fs;
+use std::path::Path;
 
-fn encrypt(
-    data: &[u8], password: &str
-) -> Result<Vec<u8>, UnknownCryptoError> {
-    let password = format!("{:0>32}", password);
-    let secret_key = aead::SecretKey::from_slice(password.as_bytes())?;
-    aead::seal(&secret_key, data)
-}
-
-fn decrypt(
-    data: &[u8], password: &str
-) -> Result<Vec<u8>, UnknownCryptoError> {
-    let password = format!("{:0>32}", password);
-    let secret_key = aead::SecretKey::from_slice(password.as_bytes())?;
-    aead::open(&secret_key, data)
-}
-
-fn read_index_file(
-    password: &str
-) -> Result<HashMap<String, String>, UnknownCryptoError> {
-    let index_file = format!("{}/index.vlt", LOCK_DIR);
-    if let Ok(contents_enc) = fs::read(&index_file) {
-        let contents_dec = decrypt(&contents_enc, password)?;
-        let contents = String::from_utf8(contents_dec).unwrap();
-        Ok(serde_json::from_str(&contents).unwrap())
-    } else {
-        Ok(HashMap::new())
+macro_rules! index_file_path {
+    () => {
+        Path::new(LOCK_DIR).join("index.vlt")
     }
 }
 
-fn write_index_file(
-    index_map: &HashMap<String, String>, password: &str
-) -> Result<(), UnknownCryptoError> {
-    let index_file = format!("{}/index.vlt", LOCK_DIR);
-    let contents = serde_json::to_string(index_map).unwrap();
-    let contents_enc = encrypt(contents.as_bytes(), password)?;
-    fs::create_dir_all(LOCK_DIR).unwrap();
-    fs::write(index_file, contents_enc).unwrap();
-    Ok(())
+macro_rules! lock_file_path {
+    ($index:expr) => {
+        Path::new(LOCK_DIR).join(format!("{:0>3}.vlt", $index))
+    }
 }
 
-fn read_encrypted_file(
-    index: u16, password: &str
-) -> Result<String, UnknownCryptoError> {
-    let file_enc = format!("{}/{:0>3}.vlt", LOCK_DIR, index);
-    let contents_enc = fs::read(&file_enc).unwrap();
-    let contents_raw = decrypt(&contents_enc, password)?;
-    Ok(String::from_utf8(contents_raw).unwrap_or("<bytes>".to_owned()))
-}
-
-fn write_encrypted_file(
-    index: u16, contents: &str, password: &str
-) -> Result<(), UnknownCryptoError> {
-    let file_enc = format!("{}/{:0>3}.vlt", LOCK_DIR, index);
-    let contents_enc = encrypt(contents.as_bytes(), password)?;
-    fs::create_dir_all(LOCK_DIR).unwrap();
-    fs::write(file_enc, contents_enc).unwrap();
-    Ok(())
-}
-
-fn remove_encrypted_file(index: u16) -> () {
-    let file_enc = format!("{}/{:0>3}.vlt", LOCK_DIR, index);
-    fs::remove_file(file_enc).unwrap()
+macro_rules! unlock_file_path {
+    ($path:expr) => {
+        Path::new(UNLOCK_DIR).join($path)
+    }
 }
 
 fn reserve_index(
-    index_map: &mut HashMap<String, String>, secret_path: &str
+    index_map: &mut HashMap<String, u16>, secret_path: &str
 ) -> u16 {
     let new_index = index_map.values()
-        .map(|val| val.parse::<u16>().unwrap())
+        .map(|value| value.to_owned())
         .collect::<Vec<_>>()
         .into_sorted()
         .into_iter()
         .fold(0, |accum, val| if accum + 1 == val { val } else { accum });
-    index_map.insert(secret_path.to_owned(), new_index.to_string());
+    index_map.insert(secret_path.to_owned(), new_index);
     new_index
 }
 
 pub fn get_secret(
     secret_path: &str, password: &str
 ) -> Result<String, SecretError> {
-    let index_map = read_index_file(password)?;
-    if let Some(index_value) = index_map.get(secret_path) {
-        let file_index = index_value.parse::<u16>().unwrap();
-        crc::check_crc(&file_index)?;
-        let contents = read_encrypted_file(file_index, password)?;
-        Ok(contents)
+    let index_path = index_file_path!();
+    let index_map = crypto::deserialize_from_file(index_path, password)?
+        .unwrap_or(HashMap::<String, u16>::new());
+    if let Some(enc_index) = index_map.get(secret_path) {
+        let enc_path = lock_file_path!(enc_index);
+        crc::check_crc(&enc_path)?;
+        let contents = crypto::read_string_from_file(enc_path, password)?;
+        Ok(contents.unwrap_or("<byte>".to_owned()))
     } else {
         Err(SecretError::NonExistentPath)
     }
@@ -102,77 +58,113 @@ pub fn get_secret(
 pub fn set_secret(
     secret_path: &str, contents: &str, password: &str
 ) -> Result<String, SecretError> {
-    let mut index_map = read_index_file(password)?;
-    let file_index = if let Some(index_value) = index_map.get(secret_path) {
-        index_value.parse::<u16>().unwrap()
-    } else {
-        let file_index = reserve_index(&mut index_map, secret_path);
-        write_index_file(&index_map, password)?;
-        file_index
+    let index_path = index_file_path!();
+    let mut index_map = crypto::deserialize_from_file(&index_path, password)?
+        .unwrap_or(HashMap::<String, u16>::new());
+    let enc_index = match index_map.get(secret_path) {
+        Some(value) => value.to_owned(),
+        None => reserve_index(&mut index_map, secret_path),
     };
-    write_encrypted_file(file_index, contents, password)?;
-    crc::update_crc(&file_index);
+    let enc_path = lock_file_path!(enc_index);
+    crypto::serialize_to_file(&index_path, index_map, password)?;
+    crypto::write_str_to_file(&enc_path, contents, password)?;
+    crc::update_crc(&enc_path);
     Ok(contents.to_owned())
+}
+
+pub fn get_secret_files(
+    secret_path_pattern: &str, password: &str
+) -> Result<Vec<String>, SecretError> {
+    let index_path = index_file_path!();
+    let index_map = crypto::deserialize_from_file(index_path, password)?
+        .unwrap_or(HashMap::<String, u16>::new());
+    let pattern = secret_path_pattern;
+    let matched_paths = glob::filter_matching(index_map.keys(), pattern);
+    Result::from_iter(matched_paths.into_iter().map(|secret_path| {
+        let enc_index = index_map.get(&secret_path).unwrap();
+        let enc_path = lock_file_path!(enc_index);
+        let dec_path = unlock_file_path!(&secret_path);
+        crc::check_crc(&enc_path)?;
+        crypto::decrypt_file(enc_path, dec_path, password)?;
+        Ok(secret_path.to_owned())
+    }))
+}
+
+pub fn set_secret_files(
+    secret_path_pattern: &str, password: &str
+) -> Result<Vec<String>, SecretError> {
+    let index_path = index_file_path!();
+    let mut index_map = crypto::deserialize_from_file(&index_path, password)?
+        .unwrap_or(HashMap::<String, u16>::new());
+    let pattern = secret_path_pattern;
+    let matched_paths = glob::get_matching_files(pattern, UNLOCK_DIR);
+    Result::from_iter(matched_paths.into_iter().map(|secret_path| {
+        let enc_index = match index_map.get(&secret_path) {
+            Some(value) => value.to_owned(),
+            None => reserve_index(&mut index_map, &secret_path),
+        };
+        let enc_path = lock_file_path!(enc_index);
+        let dec_path = unlock_file_path!(&secret_path);
+        crypto::serialize_to_file(&index_path, &index_map, password)?;
+        crypto::encrypt_file(&dec_path, &enc_path, password)?;
+        crc::update_crc(enc_path);
+        Ok(secret_path)
+    }))
 }
 
 pub fn remove_secret(
     secret_path: &str, password: &str
 ) -> Result<(), SecretError> {
-    let mut index_map = read_index_file(password)?;
-    if let Some(index_value) = index_map.get(secret_path) {
-        let file_index = index_value.parse::<u16>().unwrap();
+    let index_path = index_file_path!();
+    let mut index_map = crypto::deserialize_from_file(&index_path, password)?
+        .unwrap_or(HashMap::<String, u16>::new());
+    if let Some(enc_index) = index_map.get(secret_path) {
+        let enc_path = lock_file_path!(enc_index);
         index_map.remove(secret_path).unwrap();
-        write_index_file(&index_map, password)?;
-        remove_encrypted_file(file_index);
-        crc::update_crc(&file_index);
+        crypto::serialize_to_file(&index_path, index_map, password)?;
+        fs::remove_file(&enc_path).unwrap();
+        crc::update_crc(enc_path);
         Ok(())
     } else {
         Err(SecretError::NonExistentPath)
     }
 }
 
+pub fn clear_secret_files(
+    secret_path_pattern: &str
+) -> Result<Vec<String>, SecretError> {
+    let pattern = secret_path_pattern;
+    let matched_paths = glob::get_matching_files(pattern, UNLOCK_DIR);
+    matched_paths.iter().for_each(|path| fs::remove_file(path).unwrap());
+    // TODO: clear empty directories as well
+    Ok(matched_paths)
+}
+
 pub fn list_secret_paths(
     pattern: &str, password: &str
 ) -> Result<Vec<String>, SecretError> {
-    let index_map = read_index_file(password)?;
-    let key_set = HashSet::<String>::from_iter(index_map
-        .into_keys()
-        .filter(|key| key.starts_with(pattern))
-        .map(|key| {
-            let key_levels = key.matches('/').count();
-            let pat_levels = pattern.matches('/').count();
-            key.split('/').take(pat_levels + 1).collect::<Vec<_>>().join("/")
-                + if key_levels == pat_levels { "" } else { "/" }
-        })
-    );
-    Ok(Vec::from_iter(key_set.into_iter()))
+    let index_path = index_file_path!();
+    let index_map = crypto::deserialize_from_file(index_path, password)?
+        .unwrap_or(HashMap::<String, u16>::new());
+    Ok(glob::filter_matching(index_map.into_keys(), pattern))
 }
 
-pub fn list_secret_paths_recursive(
-    pattern: &str, password: &str
-) -> Result<Vec<String>, SecretError> {
-    let index_map = read_index_file(password)?;
-    let key_iter = index_map.into_keys()
-        .filter(|key| key.starts_with(pattern));
-    Ok(Vec::from_iter(key_iter))
-}
-
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq)]
 pub struct SecretInfo {
     pub path: String,
     pub contents: String,
 }
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq)]
 pub enum SecretError {
-    CrcMismatch { index: u16 },
+    CrcMismatch { file_path: String },
     IncorrectPassword,
     NonExistentPath,
 }
 
 impl From<CrcMismatchError> for SecretError {
     fn from(error: CrcMismatchError) -> Self {
-        Self::CrcMismatch { index: error.index }
+        Self::CrcMismatch { file_path: error.file_path }
     }
 }
 
@@ -267,7 +259,7 @@ mod test {
         super::set_secret("dir1/fil2", "cont2", "1234").unwrap();
         super::set_secret("dir1/sdir/fil3", "cont4", "1234").unwrap();
         super::set_secret("dir2/fil1", "cont3", "1234").unwrap();
-        let list = super::list_secret_paths("dir1/", "1234").unwrap()
+        let list = super::list_secret_paths("dir1/*", "1234").unwrap()
             .into_sorted();
         assert_eq!(list, ["dir1/fil1", "dir1/fil2", "dir1/sdir/"]);
         super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
@@ -281,7 +273,7 @@ mod test {
         super::set_secret("dir1/fil2", "cont2", "1234").unwrap();
         super::set_secret("dir1/sdir/fil3", "cont4", "1234").unwrap();
         super::set_secret("dir2/fil1", "cont3", "1234").unwrap();
-        let list = super::list_secret_paths_recursive("dir1/", "1234").unwrap()
+        let list = super::list_secret_paths("dir1/**", "1234").unwrap()
             .into_sorted();
         assert_eq!(list, ["dir1/fil1", "dir1/fil2", "dir1/sdir/fil3"]);
         super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();

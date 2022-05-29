@@ -84,16 +84,16 @@ pub enum ParserError {
 }
 
 impl ParserError {
-    pub fn invalid_key(key: &str) -> Self {
-        Self::InvalidKey { key: key.to_owned() }
+    pub fn invalid_key<S: Into<String>>(key: S) -> Self {
+        Self::InvalidKey { key: key.into() }
     }
 
-    pub fn missing_value(key: &str) -> Self {
-        Self::MissingValue { key: key.to_owned() }
+    pub fn missing_value<S: Into<String>>(key: S) -> Self {
+        Self::MissingValue { key: key.into() }
     }
 
-    pub fn invalid_value(key: &str) -> Self {
-        Self::InvalidValue { key: key.to_owned() }
+    pub fn invalid_value<S: Into<String>>(key: S) -> Self {
+        Self::InvalidValue { key: key.into() }
     }
 }
 

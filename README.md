@@ -7,10 +7,13 @@ Because I like simple stuff with minimal BS.
 
 ## Usage
 ```sh
+vault fget {path-glob}
+vault fset {path-glob}
+vault fclr {path-glob}
 vault get {path}
 vault set {path} {contents}
 vault rm {path}
-vault ls {path}
+vault ls {path?}
 vault crc [--force-update]
 ```
 

@@ -1,6 +1,8 @@
 mod args;
 mod constants;
 mod crc;
+mod crypto;
+mod glob;
 mod secret;
 mod util;
 mod zip;
@@ -25,13 +27,25 @@ fn main_app() -> Result<(), VaultCliError> {
 
     match args.get_index(1) {
         // "login" => { /* login */ }
-        Some("get-file") => {
-            /* write to unencrypted file */
-            Ok(())
+        Some("fget") => {
+            let path = args.expect_index(2, "secret_path")?;
+            args.expect_no_unrecognized(3, &[])?;
+            let password = prompt_password();
+            let matched_paths = secret::get_secret_files(path, &password)?;
+            Ok(println!("{}", matched_paths.join("\n")))
         }
-        Some("set-file") => {
-            /* set from unencrypted file */
-            Ok(())
+        Some("fset") => {
+            let path = args.expect_index(2, "secret_path")?;
+            args.expect_no_unrecognized(3, &[])?;
+            let password = prompt_password();
+            let matched_paths = secret::set_secret_files(path, &password)?;
+            Ok(println!("{}", matched_paths.join("\n")))
+        }
+        Some("fclr") => {
+            let path = args.get_index(2).unwrap_or("**");
+            args.expect_no_unrecognized(3, &[])?;
+            let matched_paths = secret::clear_secret_files(path)?;
+            Ok(println!("{}", matched_paths.join("\n")))
         }
         Some("get") => {
             let path = args.expect_index(2, "secret_path")?;
@@ -58,13 +72,9 @@ fn main_app() -> Result<(), VaultCliError> {
         }
         Some("ls") => {
             let pattern = args.get_index(2).unwrap_or("");
-            args.expect_no_unrecognized(3, &["recursive"])?;
+            args.expect_no_unrecognized(3, &[])?;
             let password = prompt_password();
-            let info = if args.get_value("recursive").is_some() {
-                secret::list_secret_paths_recursive(pattern, &password)
-            } else {
-                secret::list_secret_paths(pattern, &password)                
-            }?;
+            let info = secret::list_secret_paths(pattern, &password)?;
             Ok(println!("{}", info.join("\n")))
         }
         Some("crc") => {
@@ -78,10 +88,11 @@ fn main_app() -> Result<(), VaultCliError> {
         }
         Some("zip") => {
             args.expect_no_unrecognized(2, &[])?;
-            let date_stamp = Local::now().format("%Y%m%d");
-            let archive_name = format!("vault-{}.zip", date_stamp);
-            zip::zip_dirs(&archive_name, &[LOCK_DIR, "vault"]).unwrap();
-            Ok(println!("ok"))
+            let datestamp = Local::now().format("%Y%m%d");
+            let zip_name = format!("vault-{}.zip", datestamp);
+            let zip_entries = &[LOCK_DIR, "vault"];
+            let zipped_paths = zip::zip_dirs(&zip_name, zip_entries).unwrap();
+            Ok(println!("{}", zipped_paths.join("\n")))
         }
         Some(_) => {
             Err(ParserError::invalid_value("command").into())
@@ -126,7 +137,7 @@ impl From<ParserError> for VaultCliError {
 
 impl From<CrcMismatchError> for VaultCliError {
     fn from(error: CrcMismatchError) -> Self {
-        format!("crc mismatch found for file index '{}'", error.index)
+        format!("crc mismatch found for file path '{}'", error.file_path)
             + "\ncheck backups for last correct version"
     }
 }
@@ -134,8 +145,8 @@ impl From<CrcMismatchError> for VaultCliError {
 impl From<SecretError> for VaultCliError {
     fn from(error: SecretError) -> Self {
         match error {
-            SecretError::CrcMismatch { index } =>
-                format!("crc mismatch found for file index '{}'", index)
+            SecretError::CrcMismatch { file_path } =>
+                format!("crc mismatch found for file path '{}'", file_path)
                     + "\ncheck backups for last correct version",
             SecretError::IncorrectPassword =>
                 "password provided was incorrect".to_owned(),

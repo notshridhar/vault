@@ -9,5 +9,9 @@ login
 
 CLI Usage
 ---------
-set-file {path-glob} -> json::list<matched paths>
-get-file {path-glob} -> json::list<matched paths>
+
+Todo
+---
+complete clear files implementation (remove empty dirs)
+write tests
+write docs

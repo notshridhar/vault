@@ -1,27 +1,26 @@
 use crate::constants::LOCK_DIR;
 use crc::{Crc, CRC_32_ISCSI};
-use serde::Serialize;
 use std::collections::HashMap;
 use std::fs;
 use std::io;
+use std::path::Path;
 
 const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
-fn compute_crc(file_path: &str) -> io::Result<u32> {
-    let file_content = fs::read(file_path)?;
+fn compute_crc<P: AsRef<Path>>(path: P) -> io::Result<u32> {
+    let file_content = fs::read(path)?;
     Ok(CRC32.checksum(&file_content))
 }
 
-fn compute_crc_all() -> HashMap<u16, u32> {
+fn compute_crc_all() -> HashMap<String, u32> {
     if let Ok(dir_entries) = fs::read_dir(LOCK_DIR) {
         dir_entries.fold(HashMap::new(), |mut accum, entry| {
-            let lock_file = entry.unwrap();
-            let file_name = lock_file.file_name().into_string().unwrap();
-            let file_index_str = file_name.split_once('.').unwrap().0;
-            if let Ok(file_index) = file_index_str.parse::<u16>() {
-                let file_content = fs::read(lock_file.path()).unwrap();
+            let file_entry = entry.unwrap();
+            let file_name = file_entry.file_name();
+            if file_name != "index.crc" {
+                let file_content = fs::read(&file_name).unwrap();
                 let checksum = CRC32.checksum(&file_content);
-                accum.insert(file_index, checksum);
+                accum.insert(file_name.into_string().unwrap(), checksum);
             }
             accum
         })
@@ -30,80 +29,66 @@ fn compute_crc_all() -> HashMap<u16, u32> {
     }
 }
 
-fn read_crc_file() -> HashMap<u16, u32> {
-    let crc_file = format!("{}/index.crc", LOCK_DIR);
-    if let Ok(contents) = fs::read_to_string(&crc_file) {
-        serde_json::from_str(&contents).unwrap()
-    } else {
-        HashMap::new()
+fn read_crc_file() -> HashMap<String, u32> {
+    let crc_file_path = Path::new(LOCK_DIR).join("index.crc");
+    match fs::read_to_string(crc_file_path) {
+        Ok(contents) => serde_json::from_str(&contents).unwrap(),
+        Err(_) => HashMap::new(),
     }
 }
 
-fn write_crc_file(crc_map: &HashMap<u16, u32>) -> () {
-    let crc_file = format!("{}/index.crc", LOCK_DIR);
+fn write_crc_file(crc_map: &HashMap<String, u32>) -> () {
+    let crc_file = Path::new(LOCK_DIR).join("index.crc");
     let contents = serde_json::to_string(crc_map).unwrap();
     fs::create_dir_all(LOCK_DIR).unwrap();
     fs::write(crc_file, contents).unwrap()
 }
 
-pub fn check_crc(file_index: &u16) -> Result<u32, CrcMismatchError> {
-    let file_path = format!("{}/{:0>3}.vlt", LOCK_DIR, file_index);
+pub fn check_crc<P: AsRef<Path>>(path: P) -> Result<u32, CrcMismatchError> {
     let stored_crc_all = read_crc_file();
-    let error = CrcMismatchError { index: file_index.to_owned() };
-    if let Ok(computed_crc) = compute_crc(&file_path) {
-        if let Some(stored_crc) = stored_crc_all.get(file_index) {
-            if stored_crc == &computed_crc {
-                Ok(computed_crc)
-            } else {
-                Err(error)
+    let path_str = path.as_ref().to_str().unwrap();
+    match compute_crc(&path) {
+        Ok(computed_crc) => match stored_crc_all.get(path_str) {
+            Some(stored_crc) => match stored_crc == &computed_crc {
+                true => Ok(computed_crc),
+                false => Err(CrcMismatchError::new(path_str)),
             }
-        } else {
-            Err(error)
+            None => Err(CrcMismatchError::new(path_str)),
         }
-    } else {
-        Err(error)
+        Err(_) => Err(CrcMismatchError::new(path_str)),
     }
 }
 
-pub fn update_crc(file_index: &u16) -> () {
-    let file_path = format!("{}/{:0>3}.vlt", LOCK_DIR, file_index);
-    let mut stored_crc_all = read_crc_file();
-    if let Ok(computed_crc) = compute_crc(&file_path) {
-        stored_crc_all.insert(file_index.to_owned(), computed_crc);
-    } else {
-        stored_crc_all.remove(file_index);
-    }
-    write_crc_file(&stored_crc_all);
+pub fn update_crc<P: AsRef<Path>>(path: P) -> () {
+    let mut stored_crc = read_crc_file();
+    let path_str = path.as_ref().to_str().unwrap();
+    match compute_crc(&path) {
+        Ok(crc) => stored_crc.insert(path_str.to_owned(), crc),
+        Err(_) => stored_crc.remove(path_str),
+    };
+    write_crc_file(&stored_crc);
 }
 
-pub fn check_crc_all() -> Result<HashMap<u16, u32>, CrcMismatchError> {
+pub fn check_crc_all() -> Result<HashMap<String, u32>, CrcMismatchError> {
     let stored_crc = read_crc_file();
     let computed_crc = compute_crc_all();
 
-    let added_errors = computed_crc.keys()
-        .filter(|computed_key| !stored_crc.contains_key(computed_key))
-        .map(|computed_key| CrcMismatchError {
-            index: computed_key.to_owned(),
-        });
+    let added_errors = computed_crc.keys().filter_map(|computed_key| {
+        match stored_crc.contains_key(computed_key) {
+            true => None,
+            false => Some(CrcMismatchError::new(computed_key)),
+        }
+    });
 
-    let removed_errors = stored_crc.keys()
-        .filter(|stored_key| !computed_crc.contains_key(stored_key))
-        .map(|stored_key| CrcMismatchError {
-            index: stored_key.to_owned(),
-        });
+    let diff_errors = stored_crc.keys().filter_map(|stored_key| {
+        let stored_value = stored_crc.get(stored_key).unwrap();
+        match computed_crc.get(stored_key) {
+            Some(computed_value) if computed_value == stored_value => None,
+            _ => Some(CrcMismatchError::new(stored_key)),
+        }
+    });
 
-    let diff_errors = stored_crc.keys()
-        .filter(|stored_key| {
-            let stored_value = stored_crc.get(stored_key).unwrap();
-            computed_crc.get(stored_key)
-                .map(|computed_value| computed_value != stored_value)
-                .unwrap_or(false)
-        })
-        .map(|stored_key| CrcMismatchError {
-            index: stored_key.to_owned(),
-        });
-
-    match added_errors.chain(removed_errors).chain(diff_errors).next() {
+    match added_errors.chain(diff_errors).next() {
         Some(err) => Err(err),
         None => Ok(computed_crc),
     }
@@ -114,7 +99,13 @@ pub fn update_crc_all() -> () {
     write_crc_file(&computed_crc)
 }
 
-#[derive(Debug, PartialEq, Serialize)]
+#[derive(Debug, PartialEq)]
 pub struct CrcMismatchError {
-    pub index: u16,
+    pub file_path: String,
+}
+
+impl CrcMismatchError {
+    pub fn new<S: Into<String>>(path: S) -> Self {
+        Self { file_path: path.into() }
+    }
 }
