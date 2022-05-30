@@ -72,6 +72,33 @@ pub fn set_secret(
     Ok(contents.to_owned())
 }
 
+pub fn remove_secret(
+    secret_path: &str, password: &str
+) -> Result<(), SecretError> {
+    let index_path = index_file_path!();
+    let mut index_map = crypto::deserialize_from_file(&index_path, password)?
+        .unwrap_or(HashMap::<String, u16>::new());
+    if let Some(enc_index) = index_map.get(secret_path) {
+        let enc_path = lock_file_path!(enc_index);
+        index_map.remove(secret_path).unwrap();
+        crypto::serialize_to_file(&index_path, index_map, password)?;
+        fs::remove_file(&enc_path).unwrap();
+        crc::update_crc(enc_path);
+        Ok(())
+    } else {
+        Err(SecretError::NonExistentPath)
+    }
+}
+
+pub fn list_secret_paths(
+    secret_path_pattern: &str, password: &str
+) -> Result<Vec<String>, SecretError> {
+    let index_path = index_file_path!();
+    let index_map = crypto::deserialize_from_file(index_path, password)?
+        .unwrap_or(HashMap::<String, u16>::new());
+    Ok(glob::filter_matching(index_map.into_keys(), secret_path_pattern))
+}
+
 pub fn get_secret_files(
     secret_path_pattern: &str, password: &str
 ) -> Result<Vec<String>, SecretError> {
@@ -98,55 +125,29 @@ pub fn set_secret_files(
         .unwrap_or(HashMap::<String, u16>::new());
     let pattern = secret_path_pattern;
     let matched_paths = glob::get_matching_files(pattern, UNLOCK_DIR);
-    Result::from_iter(matched_paths.into_iter().map(|secret_path| {
-        let enc_index = match index_map.get(&secret_path) {
+    Result::from_iter(matched_paths.into_iter().map(|secret_pathbuf| {
+        let path_str = secret_pathbuf.to_str().unwrap();
+        let enc_index = match index_map.get(path_str) {
             Some(value) => value.to_owned(),
-            None => reserve_index(&mut index_map, &secret_path),
+            None => reserve_index(&mut index_map, path_str),
         };
         let enc_path = lock_file_path!(enc_index);
-        let dec_path = unlock_file_path!(&secret_path);
+        let dec_path = unlock_file_path!(path_str);
         crypto::serialize_to_file(&index_path, &index_map, password)?;
         crypto::encrypt_file(&dec_path, &enc_path, password)?;
         crc::update_crc(enc_path);
-        Ok(secret_path)
+        Ok(path_str.to_owned())
     }))
-}
-
-pub fn remove_secret(
-    secret_path: &str, password: &str
-) -> Result<(), SecretError> {
-    let index_path = index_file_path!();
-    let mut index_map = crypto::deserialize_from_file(&index_path, password)?
-        .unwrap_or(HashMap::<String, u16>::new());
-    if let Some(enc_index) = index_map.get(secret_path) {
-        let enc_path = lock_file_path!(enc_index);
-        index_map.remove(secret_path).unwrap();
-        crypto::serialize_to_file(&index_path, index_map, password)?;
-        fs::remove_file(&enc_path).unwrap();
-        crc::update_crc(enc_path);
-        Ok(())
-    } else {
-        Err(SecretError::NonExistentPath)
-    }
 }
 
 pub fn clear_secret_files(
     secret_path_pattern: &str
 ) -> Result<Vec<String>, SecretError> {
-    let pattern = secret_path_pattern;
-    let matched_paths = glob::get_matching_files(pattern, UNLOCK_DIR);
-    matched_paths.iter().for_each(|path| fs::remove_file(path).unwrap());
-    // TODO: clear empty directories as well
-    Ok(matched_paths)
-}
-
-pub fn list_secret_paths(
-    pattern: &str, password: &str
-) -> Result<Vec<String>, SecretError> {
-    let index_path = index_file_path!();
-    let index_map = crypto::deserialize_from_file(index_path, password)?
-        .unwrap_or(HashMap::<String, u16>::new());
-    Ok(glob::filter_matching(index_map.into_keys(), pattern))
+    let matched = glob::remove_matching_files(secret_path_pattern, UNLOCK_DIR)
+        .into_iter()
+        .map(|path| path.to_str().unwrap().to_owned())
+        .collect();
+    Ok(matched)
 }
 
 #[derive(Debug, PartialEq)]

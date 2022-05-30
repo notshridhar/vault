@@ -42,7 +42,7 @@ fn main_app() -> Result<(), VaultCliError> {
             Ok(println!("{}", matched_paths.join("\n")))
         }
         Some("fclr") => {
-            let path = args.get_index(2).unwrap_or("**");
+            let path = args.expect_index(2, "secret_path")?;
             args.expect_no_unrecognized(3, &[])?;
             let matched_paths = secret::clear_secret_files(path)?;
             Ok(println!("{}", matched_paths.join("\n")))

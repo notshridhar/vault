@@ -7,11 +7,10 @@ login
     highlight active lines
     shortcuts to copy line without showing
 
-CLI Usage
----------
-
 Todo
 ---
-complete clear files implementation (remove empty dirs)
 write tests
 write docs
+write help
+implement password salt (static in a location)
+implement password mask - easier to change password
