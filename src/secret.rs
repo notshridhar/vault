@@ -2,7 +2,7 @@ use crate::constants::{LOCK_DIR, UNLOCK_DIR};
 use crate::crc::{self, CrcMismatchError};
 use crate::crypto;
 use crate::glob;
-use crate::util::VecExt;
+use crate::util::{VecExt, PathExt};
 use orion::errors::UnknownCryptoError;
 use std::collections::HashMap;
 use std::fs;
@@ -47,7 +47,7 @@ pub fn get_secret(
         .unwrap_or(HashMap::<String, u16>::new());
     if let Some(enc_index) = index_map.get(secret_path) {
         let enc_path = lock_file_path!(enc_index);
-        crc::check_crc(&enc_path)?;
+        crc::check_crc(&enc_path, LOCK_DIR)?;
         let contents = crypto::read_string_from_file(enc_path, password)?;
         Ok(contents.unwrap_or("<byte>".to_owned()))
     } else {
@@ -68,7 +68,7 @@ pub fn set_secret(
     let enc_path = lock_file_path!(enc_index);
     crypto::serialize_to_file(&index_path, index_map, password)?;
     crypto::write_str_to_file(&enc_path, contents, password)?;
-    crc::update_crc(&enc_path);
+    crc::update_crc(&enc_path, LOCK_DIR);
     Ok(contents.to_owned())
 }
 
@@ -80,10 +80,10 @@ pub fn remove_secret(
         .unwrap_or(HashMap::<String, u16>::new());
     if let Some(enc_index) = index_map.get(secret_path) {
         let enc_path = lock_file_path!(enc_index);
-        index_map.remove(secret_path).unwrap();
+        index_map.remove(secret_path);
         crypto::serialize_to_file(&index_path, index_map, password)?;
         fs::remove_file(&enc_path).unwrap();
-        crc::update_crc(enc_path);
+        crc::update_crc(enc_path, LOCK_DIR);
         Ok(())
     } else {
         Err(SecretError::NonExistentPath)
@@ -111,7 +111,7 @@ pub fn get_secret_files(
         let enc_index = index_map.get(&secret_path).unwrap();
         let enc_path = lock_file_path!(enc_index);
         let dec_path = unlock_file_path!(&secret_path);
-        crc::check_crc(&enc_path)?;
+        crc::check_crc(&enc_path, LOCK_DIR)?;
         crypto::decrypt_file(enc_path, dec_path, password)?;
         Ok(secret_path.to_owned())
     }))
@@ -126,7 +126,7 @@ pub fn set_secret_files(
     let pattern = secret_path_pattern;
     let matched_paths = glob::get_matching_files(pattern, UNLOCK_DIR);
     Result::from_iter(matched_paths.into_iter().map(|secret_pathbuf| {
-        let path_str = secret_pathbuf.to_str().unwrap();
+        let path_str = secret_pathbuf.to_unicode_str();
         let enc_index = match index_map.get(path_str) {
             Some(value) => value.to_owned(),
             None => reserve_index(&mut index_map, path_str),
@@ -135,7 +135,7 @@ pub fn set_secret_files(
         let dec_path = unlock_file_path!(path_str);
         crypto::serialize_to_file(&index_path, &index_map, password)?;
         crypto::encrypt_file(&dec_path, &enc_path, password)?;
-        crc::update_crc(enc_path);
+        crc::update_crc(enc_path, LOCK_DIR);
         Ok(path_str.to_owned())
     }))
 }
@@ -145,7 +145,7 @@ pub fn clear_secret_files(
 ) -> Result<Vec<String>, SecretError> {
     let matched = glob::remove_matching_files(secret_path_pattern, UNLOCK_DIR)
         .into_iter()
-        .map(|path| path.to_str().unwrap().to_owned())
+        .map(|path| path.to_unicode_str().to_owned())
         .collect();
     Ok(matched)
 }
@@ -177,9 +177,10 @@ impl From<UnknownCryptoError> for SecretError {
 
 #[cfg(test)]
 mod test {
-    use super::VecExt;
     use once_cell::sync::Lazy;
+    use std::fs;
     use std::sync::Mutex;
+    use super::{VecExt, LOCK_DIR};
 
     static DIR_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -187,12 +188,12 @@ mod test {
     fn should_set_secret_and_write_correct_files() {
         let lock = DIR_LOCK.lock().unwrap();
         super::set_secret("dir1/fil1", "cont1", "1234").unwrap();
-        let entries = super::fs::read_dir(super::LOCK_DIR).unwrap()
+        let entries = fs::read_dir(LOCK_DIR).unwrap()
             .map(|entry| entry.unwrap().file_name().into_string().unwrap())
             .collect::<Vec<_>>()
             .into_sorted();
         assert_eq!(entries, ["000.vlt", "index.crc", "index.vlt"]);
-        super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
+        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
         drop(lock);
     }
 
@@ -203,7 +204,7 @@ mod test {
         super::set_secret(test_path, test_val, test_pass).unwrap();
         let contents = super::get_secret(test_path, test_pass).unwrap();
         assert_eq!(contents, test_val);
-        super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
+        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
         drop(lock);
     }
 
@@ -214,7 +215,7 @@ mod test {
         super::set_secret(test_path, test_val, test_pass).unwrap();
         let error = super::get_secret("dir1/fil2", test_pass).unwrap_err();
         assert_eq!(error, super::SecretError::NonExistentPath);
-        super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
+        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
         drop(lock);
     }
 
@@ -225,7 +226,7 @@ mod test {
         super::set_secret(test_path, test_val, test_pass).unwrap();
         let error = super::get_secret(test_path, "4321").unwrap_err();
         assert_eq!(error, super::SecretError::IncorrectPassword);
-        super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
+        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
         drop(lock);
     }
 
@@ -239,7 +240,7 @@ mod test {
         super::remove_secret(test_path, test_pass).unwrap();
         let error = super::get_secret(test_path, test_pass).unwrap_err();
         assert_eq!(error, super::SecretError::NonExistentPath);
-        super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
+        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
         drop(lock);
     }
 
@@ -249,7 +250,7 @@ mod test {
         let (test_path, test_pass) = ("dir1/fil1", "1234");
         let error = super::remove_secret(test_path, test_pass).unwrap_err();
         assert_eq!(error, super::SecretError::NonExistentPath);
-        super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
+        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
         drop(lock);
     }
 
@@ -263,7 +264,7 @@ mod test {
         let list = super::list_secret_paths("dir1/*", "1234").unwrap()
             .into_sorted();
         assert_eq!(list, ["dir1/fil1", "dir1/fil2", "dir1/sdir/"]);
-        super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
+        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
         drop(lock);
     }
 
@@ -277,7 +278,7 @@ mod test {
         let list = super::list_secret_paths("dir1/**", "1234").unwrap()
             .into_sorted();
         assert_eq!(list, ["dir1/fil1", "dir1/fil2", "dir1/sdir/fil3"]);
-        super::fs::remove_dir_all(super::LOCK_DIR).unwrap_or_default();
+        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
         drop(lock);
     }
 }

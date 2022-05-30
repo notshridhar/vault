@@ -80,9 +80,9 @@ fn main_app() -> Result<(), VaultCliError> {
         Some("crc") => {
             args.expect_no_unrecognized(2, &["force-update"])?;
             if args.get_value("force-update").is_some() {
-                crc::update_crc_all()
+                crc::update_crc_all(LOCK_DIR)
             } else {
-                crc::check_crc_all()?;
+                crc::check_crc_all(LOCK_DIR)?;
             }
             Ok(println!("ok"))
         }
