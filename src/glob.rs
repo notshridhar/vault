@@ -1,3 +1,4 @@
+use crate::util::PathExt;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -7,11 +8,9 @@ fn walk_dir<P: AsRef<Path>>(path: P) -> Vec<PathBuf> {
         let mut found_files = Vec::with_capacity(4);
         for entry_res in read_results {
             let entry_path = entry_res.unwrap().path();
-            if entry_path.is_dir() {
-                let entry_path_str = entry_path.to_str().unwrap();
-                found_files.extend(walk_dir(entry_path_str))
-            } else {
-                found_files.push(entry_path);
+            match entry_path.is_dir() {
+                true => found_files.extend(walk_dir(entry_path)),
+                false => found_files.push(entry_path),
             }
         }
         found_files
@@ -41,9 +40,8 @@ fn remove_empty_dirs<P: AsRef<Path>>(working_dir: P) -> bool {
             accum && if entry_path.is_dir() {
                 remove_empty_dirs(entry_path)
             } else {
-                let file_name = entry_path.file_name().unwrap();
-                let file_name_str = file_name.to_str().unwrap();
-                match [".DS_Store"].contains(&file_name_str) {
+                let file_name = entry_path.to_filename_str();
+                match [".DS_Store"].contains(&file_name) {
                     true => fs::remove_file(entry_path).is_ok(),
                     false => false,
                 }
@@ -56,32 +54,29 @@ fn remove_empty_dirs<P: AsRef<Path>>(working_dir: P) -> bool {
     }
 }
 
-pub fn get_matching_files<P: AsRef<Path>>(
-    pattern: &str, working_dir: P
-) -> Vec<PathBuf> {
-    let working_dir_ref = working_dir.as_ref();
+pub fn get_matching_files<P>(pattern: &str, working_dir: P) -> Vec<PathBuf>
+where P: AsRef<Path> {
     if pattern.ends_with("*") {
         let prefix = pattern.strip_suffix("*").unwrap();
         let path_parent = match Path::new(prefix).parent() {
-            Some(parent) => working_dir_ref.join(parent),
-            None => working_dir_ref.to_path_buf(),
+            Some(parent) => working_dir.as_ref().join(parent),
+            None => working_dir.as_ref().to_path_buf(),
         };
         let file_list = match pattern.ends_with("**") {
             true => walk_dir(path_parent),
             false => list_files(path_parent),
         };
         file_list.into_iter().filter_map(|path| {
-            let path = path.strip_prefix(&working_dir).unwrap();
-            match path.starts_with(prefix) {
-                true => Some(path.to_owned()),                
+            let path_rel = path.strip_prefix(&working_dir).unwrap();
+            match path_rel.starts_with(prefix) {
+                true => Some(path_rel.to_owned()),
                 false => None,
             }
         }).collect()
     } else {
-        let path = Path::new(pattern);
-        match fs::metadata(working_dir_ref.join(path)) {
+        match fs::metadata(working_dir.as_ref().join(pattern)) {
             Ok(meta) => match meta.is_file() {
-                true => [path.to_owned()].to_vec(),
+                true => [Path::new(pattern).to_path_buf()].to_vec(),
                 false => Vec::new()
             },
             Err(_) => Vec::new()
@@ -89,19 +84,17 @@ pub fn get_matching_files<P: AsRef<Path>>(
     }
 }
 
-pub fn remove_matching_files<P: AsRef<Path>>(
-    pattern: &str, working_dir: P
-) -> Vec<PathBuf> {
-    let working_dir_ref = working_dir.as_ref();
-    let matched_pathbufs = get_matching_files(pattern, working_dir_ref);
+pub fn remove_matching_files<P>(pattern: &str, working_dir: P) -> Vec<PathBuf>
+where P: AsRef<Path> {
+    let matched_pathbufs = get_matching_files(pattern, &working_dir);
     matched_pathbufs.iter().for_each(|path| {
-        fs::remove_file(working_dir_ref.join(path)).unwrap()
+        fs::remove_file(working_dir.as_ref().join(path)).unwrap()
     });
-    remove_empty_dirs(working_dir_ref);
+    remove_empty_dirs(working_dir);
     matched_pathbufs
 }
 
-pub fn filter_matching<'a, I, S>(iter: I, pattern: &str) -> Vec<String>
+pub fn filter_matching<I, S>(iter: I, pattern: &str) -> Vec<String>
 where I: Iterator<Item = S>, S: AsRef<str> {
     if pattern.ends_with("**") {
         let prefix = pattern.strip_suffix("**").unwrap();

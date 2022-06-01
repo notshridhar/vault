@@ -21,7 +21,7 @@ fn prompt_password() -> String {
     pass
 }
 
-fn main_app() -> Result<(), VaultCliError> {    
+fn main_app() -> Result<(), VaultCliError> {
     let args_list = std::env::args().collect::<Vec<_>>();
     let args = ParsedArgs::from_args(&args_list);
 
@@ -29,27 +29,27 @@ fn main_app() -> Result<(), VaultCliError> {
         // "login" => { /* login */ }
         Some("fget") => {
             let path = args.expect_index(2, "secret_path")?;
-            args.expect_no_unrecognized(3, &[])?;
+            args.expect_none_except(3, &[])?;
             let password = prompt_password();
             let matched_paths = secret::get_secret_files(path, &password)?;
             Ok(println!("{}", matched_paths.join("\n")))
         }
         Some("fset") => {
             let path = args.expect_index(2, "secret_path")?;
-            args.expect_no_unrecognized(3, &[])?;
+            args.expect_none_except(3, &[])?;
             let password = prompt_password();
             let matched_paths = secret::set_secret_files(path, &password)?;
             Ok(println!("{}", matched_paths.join("\n")))
         }
         Some("fclr") => {
             let path = args.expect_index(2, "secret_path")?;
-            args.expect_no_unrecognized(3, &[])?;
+            args.expect_none_except(3, &[])?;
             let matched_paths = secret::clear_secret_files(path)?;
             Ok(println!("{}", matched_paths.join("\n")))
         }
         Some("get") => {
             let path = args.expect_index(2, "secret_path")?;
-            args.expect_no_unrecognized(3, &[])?;
+            args.expect_none_except(3, &[])?;
             let password = prompt_password();
             let contents = secret::get_secret(path, &password)?;
             Ok(println!("{}", contents))
@@ -57,7 +57,7 @@ fn main_app() -> Result<(), VaultCliError> {
         Some("set") => {
             let path = args.expect_index(2, "secret_path")?;
             let contents_raw = args.expect_index(3, "contents")?;
-            args.expect_no_unrecognized(4, &[])?;
+            args.expect_none_except(4, &[])?;
             let password = prompt_password();
             let contents = &contents_raw.replace("\\n", "\n");
             secret::set_secret(path, contents, &password)?;
@@ -65,20 +65,20 @@ fn main_app() -> Result<(), VaultCliError> {
         }
         Some("rm") => {
             let path = args.expect_index(2, "secret_path")?;
-            args.expect_no_unrecognized(3, &[])?;
+            args.expect_none_except(3, &[])?;
             let password = prompt_password();
             secret::remove_secret(path, &password)?;
             Ok(println!("ok"))
         }
         Some("ls") => {
             let pattern = args.get_index(2).unwrap_or("");
-            args.expect_no_unrecognized(3, &[])?;
+            args.expect_none_except(3, &[])?;
             let password = prompt_password();
             let info = secret::list_secret_paths(pattern, &password)?;
             Ok(println!("{}", info.join("\n")))
         }
         Some("crc") => {
-            args.expect_no_unrecognized(2, &["force-update"])?;
+            args.expect_none_except(2, &["force-update"])?;
             if args.get_value("force-update").is_some() {
                 crc::update_crc_all(LOCK_DIR)
             } else {
@@ -87,7 +87,7 @@ fn main_app() -> Result<(), VaultCliError> {
             Ok(println!("ok"))
         }
         Some("zip") => {
-            args.expect_no_unrecognized(2, &[])?;
+            args.expect_none_except(2, &[])?;
             let datestamp = Local::now().format("%Y%m%d");
             let zip_name = format!("vault-{}.zip", datestamp);
             let zip_entries = &[LOCK_DIR, "vault"];

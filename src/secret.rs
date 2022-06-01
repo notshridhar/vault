@@ -26,62 +26,70 @@ macro_rules! unlock_file_path {
     }
 }
 
-fn reserve_index(
-    index_map: &mut HashMap<String, u16>, secret_path: &str
-) -> u16 {
-    let new_index = index_map.values()
+type IndexMap = HashMap<String, u16>;
+type SecretResult<T> = Result<T, SecretError>;
+
+fn read_index_file<P>(path: P, pass: &str) -> SecretResult<IndexMap>
+where P: AsRef<Path> {
+    crypto::read_file_de(path, pass)
+        .map(|val| val.unwrap_or(HashMap::new()))
+        .map_err(|err| err.into())
+}
+
+fn write_index_file<P>(path: P, map: &IndexMap, pass: &str) -> SecretResult<()>
+where P: AsRef<Path> {
+    crypto::write_file_ser(path, map, pass)
+        .map_err(|err| err.into())
+}
+
+fn reserve_index(map: &mut IndexMap, path: &str) -> u16 {
+    let new_index = map.values()
         .map(|value| value.to_owned())
         .collect::<Vec<_>>()
         .into_sorted()
         .into_iter()
         .fold(0, |accum, val| if accum + 1 == val { val } else { accum });
-    index_map.insert(secret_path.to_owned(), new_index);
+    map.insert(path.to_owned(), new_index);
     new_index
 }
 
-pub fn get_secret(
-    secret_path: &str, password: &str
-) -> Result<String, SecretError> {
-    let index_path = index_file_path!();
-    let index_map = crypto::deserialize_from_file(index_path, password)?
-        .unwrap_or(HashMap::<String, u16>::new());
-    if let Some(enc_index) = index_map.get(secret_path) {
+fn get_or_reserve_index(map: &mut IndexMap, path: &str) -> u16 {
+    match map.get(path) {
+        Some(value) => value.to_owned(),
+        None => reserve_index(map, path),
+    }
+}
+
+pub fn get_secret(path: &str, pass: &str) -> SecretResult<String> {
+    let index_map = read_index_file(index_file_path!(), pass)?;
+    if let Some(enc_index) = index_map.get(path) {
         let enc_path = lock_file_path!(enc_index);
         crc::check_crc(&enc_path, LOCK_DIR)?;
-        let contents = crypto::read_string_from_file(enc_path, password)?;
+        let contents = crypto::read_file_str(enc_path, pass)?;
         Ok(contents.unwrap_or("<byte>".to_owned()))
     } else {
         Err(SecretError::NonExistentPath)
     }
 }
 
-pub fn set_secret(
-    secret_path: &str, contents: &str, password: &str
-) -> Result<String, SecretError> {
+pub fn set_secret(path: &str, contents: &str, pass: &str) -> SecretResult<()> {
     let index_path = index_file_path!();
-    let mut index_map = crypto::deserialize_from_file(&index_path, password)?
-        .unwrap_or(HashMap::<String, u16>::new());
-    let enc_index = match index_map.get(secret_path) {
-        Some(value) => value.to_owned(),
-        None => reserve_index(&mut index_map, secret_path),
-    };
+    let mut index_map = read_index_file(&index_path, pass)?;
+    let enc_index = get_or_reserve_index(&mut index_map, path);
     let enc_path = lock_file_path!(enc_index);
-    crypto::serialize_to_file(&index_path, index_map, password)?;
-    crypto::write_str_to_file(&enc_path, contents, password)?;
-    crc::update_crc(&enc_path, LOCK_DIR);
-    Ok(contents.to_owned())
+    write_index_file(index_path, &index_map, pass)?;
+    crypto::write_file_str(&enc_path, contents, pass)?;
+    crc::update_crc(enc_path, LOCK_DIR);
+    Ok(())
 }
 
-pub fn remove_secret(
-    secret_path: &str, password: &str
-) -> Result<(), SecretError> {
+pub fn remove_secret(path: &str, pass: &str) -> SecretResult<()> {
     let index_path = index_file_path!();
-    let mut index_map = crypto::deserialize_from_file(&index_path, password)?
-        .unwrap_or(HashMap::<String, u16>::new());
-    if let Some(enc_index) = index_map.get(secret_path) {
+    let mut index_map = read_index_file(&index_path, pass)?;
+    if let Some(enc_index) = index_map.get(path) {
         let enc_path = lock_file_path!(enc_index);
-        index_map.remove(secret_path);
-        crypto::serialize_to_file(&index_path, index_map, password)?;
+        index_map.remove(path);
+        write_index_file(index_path, &index_map, pass)?;
         fs::remove_file(&enc_path).unwrap();
         crc::update_crc(enc_path, LOCK_DIR);
         Ok(())
@@ -90,60 +98,42 @@ pub fn remove_secret(
     }
 }
 
-pub fn list_secret_paths(
-    secret_path_pattern: &str, password: &str
-) -> Result<Vec<String>, SecretError> {
-    let index_path = index_file_path!();
-    let index_map = crypto::deserialize_from_file(index_path, password)?
-        .unwrap_or(HashMap::<String, u16>::new());
-    Ok(glob::filter_matching(index_map.into_keys(), secret_path_pattern))
+pub fn list_secret_paths(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
+    let index_map = read_index_file(index_file_path!(), pass)?;
+    Ok(glob::filter_matching(index_map.into_keys(), pat))
 }
 
-pub fn get_secret_files(
-    secret_path_pattern: &str, password: &str
-) -> Result<Vec<String>, SecretError> {
-    let index_path = index_file_path!();
-    let index_map = crypto::deserialize_from_file(index_path, password)?
-        .unwrap_or(HashMap::<String, u16>::new());
-    let pattern = secret_path_pattern;
-    let matched_paths = glob::filter_matching(index_map.keys(), pattern);
+pub fn get_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
+    let index_map = read_index_file(index_file_path!(), pass)?;
+    let matched_paths = glob::filter_matching(index_map.keys(), pat);
     Result::from_iter(matched_paths.into_iter().map(|secret_path| {
         let enc_index = index_map.get(&secret_path).unwrap();
         let enc_path = lock_file_path!(enc_index);
         let dec_path = unlock_file_path!(&secret_path);
         crc::check_crc(&enc_path, LOCK_DIR)?;
-        crypto::decrypt_file(enc_path, dec_path, password)?;
+        crypto::decrypt_file(enc_path, dec_path, pass)?;
         Ok(secret_path.to_owned())
     }))
 }
 
-pub fn set_secret_files(
-    secret_path_pattern: &str, password: &str
-) -> Result<Vec<String>, SecretError> {
+pub fn set_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     let index_path = index_file_path!();
-    let mut index_map = crypto::deserialize_from_file(&index_path, password)?
-        .unwrap_or(HashMap::<String, u16>::new());
-    let pattern = secret_path_pattern;
-    let matched_paths = glob::get_matching_files(pattern, UNLOCK_DIR);
-    Result::from_iter(matched_paths.into_iter().map(|secret_pathbuf| {
-        let path_str = secret_pathbuf.to_unicode_str();
-        let enc_index = match index_map.get(path_str) {
-            Some(value) => value.to_owned(),
-            None => reserve_index(&mut index_map, path_str),
-        };
+    let mut index_map = read_index_file(&index_path, pass)?;
+    let matched_paths = glob::get_matching_files(pat, UNLOCK_DIR);
+    Result::from_iter(matched_paths.into_iter().map(|pathbuf| {
+        let path_str = pathbuf.to_unicode_str();
+        let enc_index = get_or_reserve_index(&mut index_map, path_str);
         let enc_path = lock_file_path!(enc_index);
         let dec_path = unlock_file_path!(path_str);
-        crypto::serialize_to_file(&index_path, &index_map, password)?;
-        crypto::encrypt_file(&dec_path, &enc_path, password)?;
+        write_index_file(&index_path, &index_map, pass)?;
+        crypto::encrypt_file(dec_path, &enc_path, pass)?;
         crc::update_crc(enc_path, LOCK_DIR);
         Ok(path_str.to_owned())
     }))
 }
 
-pub fn clear_secret_files(
-    secret_path_pattern: &str
-) -> Result<Vec<String>, SecretError> {
-    let matched = glob::remove_matching_files(secret_path_pattern, UNLOCK_DIR)
+pub fn clear_secret_files(pat: &str) -> SecretResult<Vec<String>> {
+    let matched = glob::remove_matching_files(pat, UNLOCK_DIR)
         .into_iter()
         .map(|path| path.to_unicode_str().to_owned())
         .collect();
@@ -177,10 +167,11 @@ impl From<UnknownCryptoError> for SecretError {
 
 #[cfg(test)]
 mod test {
+    use crate::constants::LOCK_DIR;
+    use crate::util::VecExt;
     use once_cell::sync::Lazy;
     use std::fs;
     use std::sync::Mutex;
-    use super::{VecExt, LOCK_DIR};
 
     static DIR_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
@@ -220,7 +211,7 @@ mod test {
     }
 
     #[test]
-    fn should_not_get_secret_using_incorrect_password() {
+    fn should_not_get_secret_using_incorrect_pass() {
         let lock = DIR_LOCK.lock().unwrap();
         let (test_path, test_val, test_pass) = ("dir1/fil1", "cont1", "1234");
         super::set_secret(test_path, test_val, test_pass).unwrap();

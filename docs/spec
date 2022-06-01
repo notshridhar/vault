@@ -12,5 +12,6 @@ Todo
 write tests
 write docs
 write help
+check inline / LTO
 implement password salt (static in a location)
 implement password mask - easier to change password

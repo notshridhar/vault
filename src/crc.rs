@@ -5,6 +5,8 @@ use std::fs;
 use std::io;
 use std::path::Path;
 
+type CrcMap = HashMap<String, u32>;
+type CrcResult<T> = Result<T, CrcMismatchError>;
 const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 fn compute_crc<P: AsRef<Path>>(path: P) -> io::Result<u32> {
@@ -12,7 +14,7 @@ fn compute_crc<P: AsRef<Path>>(path: P) -> io::Result<u32> {
     Ok(CRC32.checksum(&file_content))
 }
 
-fn compute_crc_all<P: AsRef<Path>>(root_dir: P) -> HashMap<String, u32> {
+fn compute_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcMap {
     if let Ok(dir_entries) = fs::read_dir(root_dir) {
         dir_entries.fold(HashMap::new(), |mut accum, entry| {
             let file_entry = entry.unwrap();
@@ -29,25 +31,22 @@ fn compute_crc_all<P: AsRef<Path>>(root_dir: P) -> HashMap<String, u32> {
     }
 }
 
-fn read_crc_file<P: AsRef<Path>>(root_dir: P) -> HashMap<String, u32> {
+fn read_crc_file<P: AsRef<Path>>(root_dir: P) -> CrcMap {
     match fs::read_to_string(root_dir.as_ref().join("index.crc")) {
         Ok(contents) => serde_json::from_str(&contents).unwrap(),
         Err(_) => HashMap::new(),
     }
 }
 
-fn write_crc_file<P: AsRef<Path>>(
-    crc_map: &HashMap<String, u32>, root_dir: P
-) -> () {
+fn write_crc_file<P: AsRef<Path>>(crc_map: &CrcMap, root_dir: P) -> () {
     let crc_file_path = root_dir.as_ref().join("index.crc");
     let contents = serde_json::to_string(crc_map).unwrap();
     fs::create_dir_all(root_dir).unwrap();
     fs::write(crc_file_path, contents).unwrap()
 }
 
-pub fn check_crc<P: AsRef<Path>, Q: AsRef<Path>>(
-    path: P, root_dir: Q
-) -> Result<u32, CrcMismatchError> {
+pub fn check_crc<P, Q>(path: P, root_dir: Q) -> CrcResult<u32>
+where P: AsRef<Path>, Q: AsRef<Path> {
     let stored_crc_all = read_crc_file(root_dir);
     match compute_crc(&path) {
         Ok(computed_crc) => match stored_crc_all.get(path.to_unicode_str()) {
@@ -61,9 +60,8 @@ pub fn check_crc<P: AsRef<Path>, Q: AsRef<Path>>(
     }
 }
 
-pub fn update_crc<P: AsRef<Path>, Q: AsRef<Path>>(
-    path: P, root_dir: Q
-) -> () {
+pub fn update_crc<P, Q>(path: P, root_dir: Q) -> ()
+where P: AsRef<Path>, Q: AsRef<Path> {
     let mut stored_crc = read_crc_file(&root_dir);
     match compute_crc(&path) {
         Ok(crc) => stored_crc.insert(path.to_unicode_str().to_owned(), crc),
@@ -72,9 +70,7 @@ pub fn update_crc<P: AsRef<Path>, Q: AsRef<Path>>(
     write_crc_file(&stored_crc, root_dir);
 }
 
-pub fn check_crc_all<P: AsRef<Path>>(
-    root_dir: P
-) -> Result<HashMap<String, u32>, CrcMismatchError> {
+pub fn check_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcResult<CrcMap> {
     let stored_crc = read_crc_file(&root_dir);
     let computed_crc = compute_crc_all(root_dir);
 
@@ -117,14 +113,14 @@ impl CrcMismatchError {
 
 #[cfg(test)]
 mod test {
+    use crate::util::PathExt;
     use once_cell::sync::Lazy;
     use std::fs;
     use std::path::Path;
     use std::sync::Mutex;
-    use super::PathExt;
 
+    const CRC_DIR: &'static str = "crc-test-dir";
     static DIR_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
-    const CRC_DIR: &'static str = "crc-test";
 
     #[test]
     fn should_pass_crc_check_when_intact() {

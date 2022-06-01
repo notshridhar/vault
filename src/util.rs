@@ -29,11 +29,10 @@ impl<P: AsRef<Path>> PathExt for P {
 #[cfg(test)]
 mod test {
     use std::path::Path;
-    use super::PathExt;
+    use super::{PathExt, VecExt};
 
     #[test]
     fn should_sort_vec_integers() {
-        use super::VecExt;
         assert_eq!([2, 1, 3].to_vec().into_sorted(), [1, 2, 3]);
     }
 
