@@ -113,62 +113,68 @@ impl CrcMismatchError {
 
 #[cfg(test)]
 mod test {
-    use crate::util::PathExt;
     use once_cell::sync::Lazy;
     use std::fs;
+    use std::panic;
     use std::path::Path;
     use std::sync::Mutex;
 
     const CRC_DIR: &'static str = "crc-test-dir";
     static DIR_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
+    fn run_test<T>(test: T) -> ()
+    where T: FnOnce() -> () + panic::UnwindSafe {
+        let lock = DIR_LOCK.lock().unwrap();
+        fs::create_dir_all(CRC_DIR).unwrap();
+        let result = panic::catch_unwind(|| test());
+        fs::remove_dir_all(CRC_DIR).unwrap();
+        drop(lock);
+        assert!(result.is_ok())
+    }
+
     #[test]
     fn should_pass_crc_check_when_intact() {
-        let _lock = DIR_LOCK.lock().unwrap();
-        let file_path = Path::new(CRC_DIR).join("path");
-        fs::create_dir_all(CRC_DIR).unwrap();
-        fs::write(&file_path, "first_val").unwrap();
-        super::update_crc(&file_path, CRC_DIR);
-        assert_eq!(super::check_crc(file_path, CRC_DIR), Ok(()));
-        fs::remove_dir_all(CRC_DIR).unwrap();
+        run_test(|| {
+            let file_path = Path::new(CRC_DIR).join("path");
+            fs::write(&file_path, "first_val").unwrap();
+            super::update_crc(&file_path, CRC_DIR);
+            assert_eq!(super::check_crc(file_path, CRC_DIR), Ok(()));
+        })
     }
 
     #[test]
     fn should_not_pass_crc_check_when_corrupt() {
-        let _lock = DIR_LOCK.lock().unwrap();
-        let file_path = Path::new(CRC_DIR).join("path");
-        let file_name = file_path.to_filename_str();
-        fs::create_dir_all(CRC_DIR).unwrap();
-        fs::write(&file_path, "first_val").unwrap();
-        super::update_crc(&file_path, CRC_DIR);
-        fs::write(&file_path, "second_val").unwrap();
-        let error = Err(super::CrcMismatchError::new(file_name));
-        assert_eq!(super::check_crc(&file_path, CRC_DIR), error);
-        fs::remove_dir_all(CRC_DIR).unwrap();
+        run_test(|| {
+            let file_name = "path";
+            let file_path = Path::new(CRC_DIR).join(file_name);
+            fs::write(&file_path, "first_val").unwrap();
+            super::update_crc(&file_path, CRC_DIR);
+            fs::write(&file_path, "second_val").unwrap();
+            let error = Err(super::CrcMismatchError::new(file_name));
+            assert_eq!(super::check_crc(&file_path, CRC_DIR), error);
+        })
     }
 
     #[test]
     fn should_pass_crc_check_all_when_intact() {
-        let _lock = DIR_LOCK.lock().unwrap();
-        let file_path = Path::new(CRC_DIR).join("path");
-        fs::create_dir_all(CRC_DIR).unwrap();
-        fs::write(file_path, "first_val").unwrap();
-        super::update_crc_all(CRC_DIR);
-        assert_eq!(super::check_crc_all(CRC_DIR), Ok(()));
-        fs::remove_dir_all(CRC_DIR).unwrap();
+        run_test(|| {
+            let file_path = Path::new(CRC_DIR).join("path");
+            fs::write(file_path, "first_val").unwrap();
+            super::update_crc_all(CRC_DIR);
+            assert_eq!(super::check_crc_all(CRC_DIR), Ok(()));
+        })
     }
 
     #[test]
     fn should_not_pass_crc_check_all_when_corrupt() {
-        let _lock = DIR_LOCK.lock().unwrap();
-        let file_path = Path::new(CRC_DIR).join("path");
-        let file_name = file_path.to_filename_str();
-        fs::create_dir_all(CRC_DIR).unwrap();
-        fs::write(&file_path, "first_val").unwrap();
-        super::update_crc_all(CRC_DIR);
-        fs::write(&file_path, "second_val").unwrap();
-        let error = Err(super::CrcMismatchError::new(file_name));
-        assert_eq!(super::check_crc_all(CRC_DIR), error);
-        fs::remove_dir_all(CRC_DIR).unwrap();
+        run_test(|| {
+            let file_name = "path";
+            let file_path = Path::new(CRC_DIR).join(file_name);
+            fs::write(&file_path, "first_val").unwrap();
+            super::update_crc_all(CRC_DIR);
+            fs::write(file_path, "second_val").unwrap();
+            let error = Err(super::CrcMismatchError::new(file_name));
+            assert_eq!(super::check_crc_all(CRC_DIR), error);
+        })
     }
 }

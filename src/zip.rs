@@ -37,24 +37,34 @@ mod test {
     use crate::util::PathExt;
     use once_cell::sync::Lazy;
     use std::fs;
+    use std::panic;
     use std::path::Path;
     use std::sync::Mutex;
 
     const ZIP_DIR: &'static str = "zip-test-dir";
     static DIR_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
+    fn run_test<T>(test: T) -> ()
+    where T: FnOnce() -> () + panic::UnwindSafe {
+        let lock = DIR_LOCK.lock().unwrap();
+        fs::create_dir_all(ZIP_DIR).unwrap();
+        let result = panic::catch_unwind(|| test());
+        fs::remove_dir_all(ZIP_DIR).unwrap();
+        drop(lock);
+        assert!(result.is_ok())
+    }
+
     #[test]
     fn should_zip_files() {
-        let _lock = DIR_LOCK.lock().unwrap();
         let zip_dir = Path::new(ZIP_DIR);
         let file_path = zip_dir.join("file1");
         let final_file = "final.zip";
-        fs::create_dir_all(zip_dir).unwrap();
-        fs::write(&file_path, "contents").unwrap();
-        let matched = super::zip_files(final_file, &[zip_dir]).unwrap();
-        assert_eq!(matched, [file_path.to_path_str()]);
-        assert!(fs::read(final_file).is_ok());
-        fs::remove_dir_all(zip_dir).unwrap();
-        fs::remove_file(final_file).unwrap();
+        run_test(|| {
+            fs::write(&file_path, "contents").unwrap();
+            let matched = super::zip_files(final_file, &[zip_dir]).unwrap();
+            assert_eq!(matched, [file_path.to_path_str()]);
+            assert!(fs::read(final_file).is_ok());
+            fs::remove_file(final_file).unwrap();
+        })
     }
 }

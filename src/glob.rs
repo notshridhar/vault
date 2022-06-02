@@ -144,18 +144,26 @@ mod test {
     use crate::util::{VecExt, PathExt};
     use once_cell::sync::Lazy;
     use std::fs;
+    use std::panic;
     use std::path::{Path, PathBuf};
     use std::sync::Mutex;
 
     const GLOB_DIR: &'static str = "glob-test-dir";
     static DIR_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
-    fn create_test_files(root_dir: &Path) -> () {
+    fn run_test<T>(test: T) -> ()
+    where T: FnOnce() -> () + panic::UnwindSafe {
+        let lock = DIR_LOCK.lock().unwrap();
+        let root_dir = Path::new(GLOB_DIR);
         let sub_dir = root_dir.join("sub");
         fs::create_dir_all(&sub_dir).unwrap();
         fs::write(root_dir.join("f1"), "content f1").unwrap();
         fs::write(root_dir.join("f2"), "content f2").unwrap();
         fs::write(sub_dir.join("f3"), "content f3").unwrap();
+        let result = panic::catch_unwind(|| test());
+        fs::remove_dir_all(root_dir).unwrap_or_default();
+        drop(lock);
+        assert!(result.is_ok())
     }
 
     fn map_pathbuf_to_string(original: Vec<PathBuf>) -> Vec<String> {
@@ -168,59 +176,46 @@ mod test {
 
     #[test]
     fn should_get_matching_files_absolute() {
-        let _lock = DIR_LOCK.lock().unwrap();
-        let root_dir = Path::new(GLOB_DIR);
-        create_test_files(root_dir);
-        let matched = super::get_matching_files("f1", root_dir);
-        let matched_str = map_pathbuf_to_string(matched);
-        assert_eq!(matched_str, ["f1"]);
-        fs::remove_dir_all(root_dir).unwrap();
+        run_test(|| {
+            let matched = super::get_matching_files("f1", GLOB_DIR);
+            assert_eq!(map_pathbuf_to_string(matched), ["f1"]);
+        })
     }
 
     #[test]
     fn should_get_matching_files_same_level() {
-        let _lock = DIR_LOCK.lock().unwrap();
-        let root_dir = Path::new(GLOB_DIR);
-        create_test_files(root_dir);
-        let matched = super::get_matching_files("f*", root_dir);
-        let matched_str = map_pathbuf_to_string(matched);
-        assert_eq!(matched_str, ["f1", "f2"]);
-        fs::remove_dir_all(root_dir).unwrap();
+        run_test(|| {
+            let matched = super::get_matching_files("f*", GLOB_DIR);
+            assert_eq!(map_pathbuf_to_string(matched), ["f1", "f2"]);
+        })
     }
 
     #[test]
     fn should_get_matching_files_recursive() {
-        let _lock = DIR_LOCK.lock().unwrap();
-        let root_dir = Path::new(GLOB_DIR);
-        create_test_files(root_dir);
-        let matched = super::get_matching_files("**", root_dir);
-        let matched_str = map_pathbuf_to_string(matched);
-        assert_eq!(matched_str, ["f1", "f2", "sub/f3"]);
-        fs::remove_dir_all(root_dir).unwrap();
+        run_test(|| {
+            let matched = super::get_matching_files("**", GLOB_DIR);
+            assert_eq!(map_pathbuf_to_string(matched), ["f1", "f2", "sub/f3"]);
+        })
     }
 
     #[test]
     fn should_remove_matching_files_same_level() {
-        let _lock = DIR_LOCK.lock().unwrap();
         let root_dir = Path::new(GLOB_DIR);
-        create_test_files(root_dir);
-        let matched = super::remove_matching_files("f*", root_dir);
-        let matched_str = map_pathbuf_to_string(matched);
-        assert_eq!(matched_str, ["f1", "f2"]);
-        assert!(fs::read(root_dir.join("f1")).is_err());
-        assert!(fs::read(root_dir.join("sub").join("f3")).is_ok());
-        fs::remove_dir_all(root_dir).unwrap();
+        run_test(|| {
+            let matched = super::remove_matching_files("f*", root_dir);
+            assert_eq!(map_pathbuf_to_string(matched), ["f1", "f2"]);
+            assert!(fs::read(root_dir.join("f1")).is_err());
+            assert!(fs::read(root_dir.join("sub").join("f3")).is_ok());
+        })
     }
 
     #[test]
     fn should_remove_matching_files_recursive() {
-        let _lock = DIR_LOCK.lock().unwrap();
-        let root_dir = Path::new(GLOB_DIR);
-        create_test_files(root_dir);
-        let matched = super::remove_matching_files("**", root_dir);
-        let matched_str = map_pathbuf_to_string(matched);
-        assert_eq!(matched_str, ["f1", "f2", "sub/f3"]);
-        assert!(fs::read_dir(root_dir).is_err());
+        run_test(|| {
+            let matched = super::remove_matching_files("**", GLOB_DIR);
+            assert_eq!(map_pathbuf_to_string(matched), ["f1", "f2", "sub/f3"]);
+            assert!(fs::read_dir(GLOB_DIR).is_err());
+        })
     }
 
     #[test]

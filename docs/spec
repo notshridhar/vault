@@ -9,8 +9,6 @@ login
 
 Todo
 ---
-write tests
-use proper setup and teardown for tests
 write help
 write docs
 implement password salt (static in a location)

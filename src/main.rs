@@ -164,8 +164,3 @@ impl From<SecretError> for VaultCliError {
         }
     }
 }
-
-#[cfg(test)]
-mod test {
-
-}
