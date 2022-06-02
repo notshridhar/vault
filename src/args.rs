@@ -52,8 +52,9 @@ impl ParsedArgs {
         self.get_index(index).ok_or(ParserError::missing_value(key))
     }
 
-    pub fn expect_none_except(&self, index: u16, keys: &[&str])
-    -> ParserResult<()> {
+    pub fn expect_none_except(
+        &self, index: u16, keys: &[&str]
+    ) -> ParserResult<()> {
         if self.options.contains_key(&index.to_string()) {
             Err(ParserError::TooManyIndexed)
         } else {
@@ -141,5 +142,17 @@ mod test {
         assert_eq!(args.get_value("key1"), Some("a,b"));
         assert_eq!(args.get_value("key2"), Some("val"));
         assert_eq!(args.get_value("forc"), None);
+    }
+
+    #[test]
+    fn should_throw_error_for_unrecognized_args() {
+        let command = "vlt get --force --key val";
+        let args_list = get_args_from_command(command);
+        let args = super::ParsedArgs::from_args(&args_list);
+        let error = Err(super::ParserError::TooManyIndexed);
+        assert_eq!(args.expect_none_except(0, &[]), error);
+        let error = Err(super::ParserError::invalid_key("force"));
+        assert_eq!(args.expect_none_except(2, &["key"]), error);
+        assert_eq!(args.expect_none_except(2, &["key", "force"]), Ok(()));
     }
 }

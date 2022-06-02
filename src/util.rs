@@ -12,12 +12,12 @@ impl<T: Ord> VecExt<T> for Vec<T> {
 }
 
 pub trait PathExt {
-    fn to_unicode_str(&self) -> &str;
+    fn to_path_str(&self) -> &str;
     fn to_filename_str(&self) -> &str;
 }
 
 impl<P: AsRef<Path>> PathExt for P {
-    fn to_unicode_str(&self) -> &str {
+    fn to_path_str(&self) -> &str {
         self.as_ref().to_str().unwrap()
     }
 
@@ -39,7 +39,7 @@ mod test {
     #[test]
     fn should_get_unicode_str_for_path() {
         let path = Path::new("test").join("path.txt");
-        assert_eq!(path.to_unicode_str(), "test/path.txt");
+        assert_eq!(path.to_path_str(), "test/path.txt");
     }
 
     #[test]

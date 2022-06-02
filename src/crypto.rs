@@ -35,7 +35,7 @@ where P: AsRef<Path> {
     let contents_enc = encrypt(val.as_bytes(), pass)?;
     path.as_ref()
         .parent()
-        .map(|parent| fs::create_dir_all(parent).unwrap_or_default());
+        .map(|parent| fs::create_dir_all(parent).unwrap());
     fs::write(path, contents_enc).unwrap();
     Ok(())
 }
@@ -58,7 +58,7 @@ where P: AsRef<Path>, Q: AsRef<Path> {
     let contents_enc = encrypt(&contents_raw, pass)?;
     dest.as_ref()
         .parent()
-        .map(|parent| fs::create_dir_all(parent).unwrap_or_default());
+        .map(|parent| fs::create_dir_all(parent).unwrap());
     fs::write(dest, contents_enc).unwrap();
     Ok(())
 }
@@ -69,36 +69,108 @@ where P: AsRef<Path>, Q: AsRef<Path> {
     let contents_raw = decrypt(&contents_enc, pass)?;
     dest.as_ref()
         .parent()
-        .map(|parent| fs::create_dir_all(parent).unwrap_or_default());
+        .map(|parent| fs::create_dir_all(parent).unwrap());
     fs::write(dest, contents_raw).unwrap();
     Ok(())
 }
 
 #[cfg(test)]
 mod test {
-    // use once_cell::sync::Lazy;
+    use once_cell::sync::Lazy;
     use orion::errors::UnknownCryptoError;
-    // use std::sync::Mutex;
+    use std::collections::HashMap;
+    use std::fs;
+    use std::path::Path;
+    use std::sync::Mutex;
 
-    // const CRYPTO_DIR: &'static str = "crypto-test-dir";
-    // static DIR_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+    const CRYPTO_DIR: &'static str = "crypto-test-dir";
+    static DIR_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]
-    fn should_decrypt_data_with_correct_password() {
-        let (data, password) = ("contents", "1234");
-        let data_enc = super::encrypt(data.as_bytes(), password).unwrap();
-        let data_dec = super::decrypt(&data_enc, password).unwrap();
+    fn should_encrypt_and_decrypt_data_with_same_pass() {
+        let (data, pass) = ("contents", "1234");
+        let data_enc = super::encrypt(data.as_bytes(), pass).unwrap();
+        let data_dec = super::decrypt(&data_enc, pass).unwrap();
         assert_eq!(String::from_utf8(data_dec).unwrap(), data);
     }
 
     #[test]
-    fn should_not_decrypt_data_with_incorrect_password() {
-        let (data, password) = ("contents", "1234");
-        let data_enc = super::encrypt(data.as_bytes(), password).unwrap();
-        let error = super::decrypt(&data_enc, "12345").unwrap_err();
-        assert_eq!(error, UnknownCryptoError);
+    fn should_not_encrypt_and_decrypt_data_with_different_pass() {
+        let (data, pass) = ("contents", "1234");
+        let data_enc = super::encrypt(data.as_bytes(), pass).unwrap();
+        let error = Err(UnknownCryptoError);
+        assert_eq!(super::decrypt(&data_enc, "12345"), error);
     }
 
-    // #[test]
-    // fn should_decrypt
+    #[test]
+    fn should_read_non_existent_file_str_with_any_pass() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let file_path = Path::new(CRYPTO_DIR).join("key");
+        assert_eq!(super::read_file_str(file_path, "1234"), Ok(None));
+    }
+
+    #[test]
+    fn should_write_and_read_file_str_with_same_pass() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let (data, pass) = ("contents".to_owned(), "1234");
+        let file_path = Path::new(CRYPTO_DIR).join("key");
+        fs::create_dir_all(CRYPTO_DIR).unwrap();
+        assert_eq!(super::write_file_str(&file_path, &data, pass), Ok(()));
+        assert_eq!(super::read_file_str(file_path, pass), Ok(Some(data)));
+        fs::remove_dir_all(CRYPTO_DIR).unwrap();
+    }
+
+    #[test]
+    fn should_not_write_and_read_file_str_with_different_pass() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let (data, pass) = ("contents".to_owned(), "1234");
+        let file_path = Path::new(CRYPTO_DIR).join("key");
+        fs::create_dir_all(CRYPTO_DIR).unwrap();
+        let error = Err(UnknownCryptoError);
+        assert_eq!(super::write_file_str(&file_path, &data, pass), Ok(()));
+        assert_eq!(super::read_file_str(file_path, "12345"), error);
+        fs::remove_dir_all(CRYPTO_DIR).unwrap();
+    }
+
+    #[test]
+    fn should_write_and_read_file_serde_with_same_pass() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let data = HashMap::from([("key".to_owned(), "value".to_owned())]);
+        let pass = "1234";
+        let file_path = Path::new(CRYPTO_DIR).join("key");
+        fs::create_dir_all(CRYPTO_DIR).unwrap();
+        assert_eq!(super::write_file_ser(&file_path, &data, pass), Ok(()));
+        assert_eq!(super::read_file_de(file_path, pass), Ok(Some(data)));
+        fs::remove_dir_all(CRYPTO_DIR).unwrap();
+    }
+
+    #[test]
+    fn should_encrypt_and_decrypt_file_with_same_pass() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let (data, pass) = ("contents", "1234");
+        let dec_path = Path::new(CRYPTO_DIR).join("key");
+        let enc_path = Path::new(CRYPTO_DIR).join("key-enc");
+        fs::create_dir_all(CRYPTO_DIR).unwrap();
+        fs::write(&dec_path, data).unwrap();
+        assert_eq!(super::encrypt_file(&dec_path, &enc_path, pass), Ok(()));
+        fs::remove_file(&dec_path).unwrap();
+        assert_eq!(super::decrypt_file(enc_path, &dec_path, pass), Ok(()));
+        assert_eq!(fs::read_to_string(dec_path).unwrap(), data);
+        fs::remove_dir_all(CRYPTO_DIR).unwrap();
+    }
+
+    #[test]
+    fn should_not_encrypt_and_decrypt_file_with_different_pass() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let (data, pass) = ("contents", "1234");
+        let dec_path = Path::new(CRYPTO_DIR).join("key");
+        let enc_path = Path::new(CRYPTO_DIR).join("key-enc");
+        fs::create_dir_all(CRYPTO_DIR).unwrap();
+        fs::write(&dec_path, data).unwrap();
+        assert_eq!(super::encrypt_file(&dec_path, &enc_path, pass), Ok(()));
+        fs::remove_file(&dec_path).unwrap();
+        let error = Err(UnknownCryptoError);
+        assert_eq!(super::decrypt_file(enc_path, dec_path, "12345"), error);
+        fs::remove_dir_all(CRYPTO_DIR).unwrap();
+    }
 }

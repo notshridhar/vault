@@ -10,8 +10,8 @@ login
 Todo
 ---
 write tests
-write docs
+use proper setup and teardown for tests
 write help
-check inline / LTO
+write docs
 implement password salt (static in a location)
 implement password mask - easier to change password

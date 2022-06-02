@@ -6,28 +6,55 @@ use zip::ZipWriter;
 use zip::result::ZipResult;
 use zip::write::FileOptions;
 
-pub fn zip_dirs<P>(name: &str, include: &[P]) -> ZipResult<Vec<String>>
-where P: AsRef<Path> {
-    let archive = fs::File::create(name).unwrap();
+pub fn zip_files<P, Q>(path: P, include: &[Q]) -> ZipResult<Vec<String>>
+where P: AsRef<Path>, Q: AsRef<Path> {
+    let archive = fs::File::create(path).unwrap();
     let mut zip = ZipWriter::new(archive);
     let mut zipped_paths = Vec::with_capacity(10);
     let options = FileOptions::default();
     for entry in include {
         if let Ok(file_contents) = fs::read(entry) {
-            zip.start_file(entry.to_unicode_str(), options)?;
+            zip.start_file(entry.to_path_str(), options)?;
             zip.write_all(&file_contents)?;
-            zipped_paths.push(entry.to_filename_str().to_owned());
+            zipped_paths.push(entry.to_path_str().to_owned());
         } else if let Ok(dir_entries) = fs::read_dir(entry) {
-            zip.add_directory(entry.to_unicode_str(), options)?;
+            zip.add_directory(entry.to_path_str(), options)?;
             for dir_entry in dir_entries {
                 let file_path = dir_entry.unwrap().path();
                 let file_contents = fs::read(&file_path).unwrap();
-                zip.start_file(file_path.to_unicode_str(), options)?;
+                zip.start_file(file_path.to_path_str(), options)?;
                 zip.write_all(&file_contents)?;
-                zipped_paths.push(file_path.to_filename_str().to_owned());
+                zipped_paths.push(file_path.to_path_str().to_owned());
             }
         }
     }
     zip.finish()?;
     Ok(zipped_paths)
+}
+
+#[cfg(test)]
+mod test {
+    use crate::util::PathExt;
+    use once_cell::sync::Lazy;
+    use std::fs;
+    use std::path::Path;
+    use std::sync::Mutex;
+
+    const ZIP_DIR: &'static str = "zip-test-dir";
+    static DIR_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+
+    #[test]
+    fn should_zip_files() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let zip_dir = Path::new(ZIP_DIR);
+        let file_path = zip_dir.join("file1");
+        let final_file = "final.zip";
+        fs::create_dir_all(zip_dir).unwrap();
+        fs::write(&file_path, "contents").unwrap();
+        let matched = super::zip_files(final_file, &[zip_dir]).unwrap();
+        assert_eq!(matched, [file_path.to_path_str()]);
+        assert!(fs::read(final_file).is_ok());
+        fs::remove_dir_all(zip_dir).unwrap();
+        fs::remove_file(final_file).unwrap();
+    }
 }

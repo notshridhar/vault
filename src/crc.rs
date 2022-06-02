@@ -45,13 +45,13 @@ fn write_crc_file<P: AsRef<Path>>(crc_map: &CrcMap, root_dir: P) -> () {
     fs::write(crc_file_path, contents).unwrap()
 }
 
-pub fn check_crc<P, Q>(path: P, root_dir: Q) -> CrcResult<u32>
+pub fn check_crc<P, Q>(path: P, root_dir: Q) -> CrcResult<()>
 where P: AsRef<Path>, Q: AsRef<Path> {
     let stored_crc_all = read_crc_file(root_dir);
     match compute_crc(&path) {
-        Ok(computed_crc) => match stored_crc_all.get(path.to_unicode_str()) {
+        Ok(computed_crc) => match stored_crc_all.get(path.to_path_str()) {
             Some(stored_crc) => match stored_crc == &computed_crc {
-                true => Ok(computed_crc),
+                true => Ok(()),
                 false => Err(CrcMismatchError::new(path.to_filename_str())),
             }
             None => Err(CrcMismatchError::new(path.to_filename_str())),
@@ -64,13 +64,13 @@ pub fn update_crc<P, Q>(path: P, root_dir: Q) -> ()
 where P: AsRef<Path>, Q: AsRef<Path> {
     let mut stored_crc = read_crc_file(&root_dir);
     match compute_crc(&path) {
-        Ok(crc) => stored_crc.insert(path.to_unicode_str().to_owned(), crc),
-        Err(_) => stored_crc.remove(path.to_unicode_str()),
+        Ok(crc) => stored_crc.insert(path.to_path_str().to_owned(), crc),
+        Err(_) => stored_crc.remove(path.to_path_str()),
     };
     write_crc_file(&stored_crc, root_dir);
 }
 
-pub fn check_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcResult<CrcMap> {
+pub fn check_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcResult<()> {
     let stored_crc = read_crc_file(&root_dir);
     let computed_crc = compute_crc_all(root_dir);
 
@@ -91,7 +91,7 @@ pub fn check_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcResult<CrcMap> {
 
     match added_errors.chain(diff_errors).next() {
         Some(err) => Err(err),
-        None => Ok(computed_crc),
+        None => Ok(()),
     }
 }
 
@@ -124,55 +124,51 @@ mod test {
 
     #[test]
     fn should_pass_crc_check_when_intact() {
-        let lock = DIR_LOCK.lock().unwrap();
-        fs::create_dir_all(CRC_DIR).unwrap_or_default();
+        let _lock = DIR_LOCK.lock().unwrap();
         let file_path = Path::new(CRC_DIR).join("path");
+        fs::create_dir_all(CRC_DIR).unwrap();
         fs::write(&file_path, "first_val").unwrap();
         super::update_crc(&file_path, CRC_DIR);
-        super::check_crc(file_path, CRC_DIR).unwrap();
+        assert_eq!(super::check_crc(file_path, CRC_DIR), Ok(()));
         fs::remove_dir_all(CRC_DIR).unwrap();
-        drop(lock);
-    }
-
-    #[test]
-    fn should_pass_crc_check_all_when_intact() {
-        let lock = DIR_LOCK.lock().unwrap();
-        fs::create_dir_all(CRC_DIR).unwrap_or_default();
-        let file_path = Path::new(CRC_DIR).join("path");
-        fs::write(file_path, "first_val").unwrap();
-        super::update_crc_all(CRC_DIR);
-        super::check_crc_all(CRC_DIR).unwrap();
-        fs::remove_dir_all(CRC_DIR).unwrap();
-        drop(lock);
     }
 
     #[test]
     fn should_not_pass_crc_check_when_corrupt() {
-        let lock = DIR_LOCK.lock().unwrap();
-        fs::create_dir_all(CRC_DIR).unwrap_or_default();
+        let _lock = DIR_LOCK.lock().unwrap();
         let file_path = Path::new(CRC_DIR).join("path");
+        let file_name = file_path.to_filename_str();
+        fs::create_dir_all(CRC_DIR).unwrap();
         fs::write(&file_path, "first_val").unwrap();
         super::update_crc(&file_path, CRC_DIR);
         fs::write(&file_path, "second_val").unwrap();
-        let err = super::check_crc(&file_path, CRC_DIR).unwrap_err();
-        let file_name_str = file_path.to_filename_str();
-        assert_eq!(err, super::CrcMismatchError::new(file_name_str));
+        let error = Err(super::CrcMismatchError::new(file_name));
+        assert_eq!(super::check_crc(&file_path, CRC_DIR), error);
         fs::remove_dir_all(CRC_DIR).unwrap();
-        drop(lock);
+    }
+
+    #[test]
+    fn should_pass_crc_check_all_when_intact() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let file_path = Path::new(CRC_DIR).join("path");
+        fs::create_dir_all(CRC_DIR).unwrap();
+        fs::write(file_path, "first_val").unwrap();
+        super::update_crc_all(CRC_DIR);
+        assert_eq!(super::check_crc_all(CRC_DIR), Ok(()));
+        fs::remove_dir_all(CRC_DIR).unwrap();
     }
 
     #[test]
     fn should_not_pass_crc_check_all_when_corrupt() {
-        let lock = DIR_LOCK.lock().unwrap();
-        fs::create_dir_all(CRC_DIR).unwrap_or_default();
+        let _lock = DIR_LOCK.lock().unwrap();
         let file_path = Path::new(CRC_DIR).join("path");
+        let file_name = file_path.to_filename_str();
+        fs::create_dir_all(CRC_DIR).unwrap();
         fs::write(&file_path, "first_val").unwrap();
         super::update_crc_all(CRC_DIR);
         fs::write(&file_path, "second_val").unwrap();
-        let err = super::check_crc_all(CRC_DIR).unwrap_err();
-        let file_name_str = file_path.to_filename_str();
-        assert_eq!(err, super::CrcMismatchError::new(file_name_str));
+        let error = Err(super::CrcMismatchError::new(file_name));
+        assert_eq!(super::check_crc_all(CRC_DIR), error);
         fs::remove_dir_all(CRC_DIR).unwrap();
-        drop(lock);
     }
 }

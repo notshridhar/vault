@@ -121,7 +121,7 @@ pub fn set_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     let mut index_map = read_index_file(&index_path, pass)?;
     let matched_paths = glob::get_matching_files(pat, UNLOCK_DIR);
     Result::from_iter(matched_paths.into_iter().map(|pathbuf| {
-        let path_str = pathbuf.to_unicode_str();
+        let path_str = pathbuf.to_path_str();
         let enc_index = get_or_reserve_index(&mut index_map, path_str);
         let enc_path = lock_file_path!(enc_index);
         let dec_path = unlock_file_path!(path_str);
@@ -132,12 +132,11 @@ pub fn set_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     }))
 }
 
-pub fn clear_secret_files(pat: &str) -> SecretResult<Vec<String>> {
-    let matched = glob::remove_matching_files(pat, UNLOCK_DIR)
+pub fn clear_secret_files(pat: &str) -> Vec<String> {
+    glob::remove_matching_files(pat, UNLOCK_DIR)
         .into_iter()
-        .map(|path| path.to_unicode_str().to_owned())
-        .collect();
-    Ok(matched)
+        .map(|path| path.to_path_str().to_owned())
+        .collect()
 }
 
 #[derive(Debug, PartialEq)]
@@ -167,87 +166,78 @@ impl From<UnknownCryptoError> for SecretError {
 
 #[cfg(test)]
 mod test {
-    use crate::constants::LOCK_DIR;
+    use crate::constants::{LOCK_DIR, UNLOCK_DIR};
     use crate::util::VecExt;
     use once_cell::sync::Lazy;
     use std::fs;
+    use std::path::Path;
     use std::sync::Mutex;
 
     static DIR_LOCK: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
 
     #[test]
-    fn should_set_secret_and_write_correct_files() {
-        let lock = DIR_LOCK.lock().unwrap();
+    fn should_set_secret() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let root_dir = Path::new(LOCK_DIR);
         super::set_secret("dir1/fil1", "cont1", "1234").unwrap();
-        let entries = fs::read_dir(LOCK_DIR).unwrap()
-            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
-            .collect::<Vec<_>>()
-            .into_sorted();
-        assert_eq!(entries, ["000.vlt", "index.crc", "index.vlt"]);
-        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
-        drop(lock);
+        assert!(fs::read(root_dir.join("000.vlt")).is_ok());
+        assert!(fs::read(root_dir.join("index.vlt")).is_ok());
+        assert!(fs::read(root_dir.join("index.crc")).is_ok());
+        fs::remove_dir_all(LOCK_DIR).unwrap();
     }
 
     #[test]
     fn should_get_existent_secret_path() {
-        let lock = DIR_LOCK.lock().unwrap();
+        let _lock = DIR_LOCK.lock().unwrap();
         let (test_path, test_val, test_pass) = ("dir1/fil1", "cont1", "1234");
         super::set_secret(test_path, test_val, test_pass).unwrap();
-        let contents = super::get_secret(test_path, test_pass).unwrap();
-        assert_eq!(contents, test_val);
-        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
-        drop(lock);
+        assert_eq!(super::get_secret(test_path, test_pass).unwrap(), test_val);
+        fs::remove_dir_all(LOCK_DIR).unwrap();
     }
 
     #[test]
     fn should_not_get_non_existent_secret_path() {
-        let lock = DIR_LOCK.lock().unwrap();
+        let _lock = DIR_LOCK.lock().unwrap();
         let (test_path, test_val, test_pass) = ("dir1/fil1", "cont1", "1234");
         super::set_secret(test_path, test_val, test_pass).unwrap();
-        let error = super::get_secret("dir1/fil2", test_pass).unwrap_err();
-        assert_eq!(error, super::SecretError::NonExistentPath);
-        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
-        drop(lock);
+        let error = Err(super::SecretError::NonExistentPath);
+        assert_eq!(super::get_secret("dir1/fil2", test_pass), error);
+        fs::remove_dir_all(LOCK_DIR).unwrap();
     }
 
     #[test]
     fn should_not_get_secret_using_incorrect_pass() {
-        let lock = DIR_LOCK.lock().unwrap();
+        let _lock = DIR_LOCK.lock().unwrap();
         let (test_path, test_val, test_pass) = ("dir1/fil1", "cont1", "1234");
         super::set_secret(test_path, test_val, test_pass).unwrap();
-        let error = super::get_secret(test_path, "4321").unwrap_err();
-        assert_eq!(error, super::SecretError::IncorrectPassword);
-        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
-        drop(lock);
+        let error = Err(super::SecretError::IncorrectPassword);
+        assert_eq!(super::get_secret(test_path, "4321"), error);
+        fs::remove_dir_all(LOCK_DIR).unwrap();
     }
 
     #[test]
     fn should_remove_existent_secret_path() {
-        let lock = DIR_LOCK.lock().unwrap();
+        let _lock = DIR_LOCK.lock().unwrap();
         let (test_path, test_val, test_pass) = ("dir1/fil1", "cont1", "1234");
         super::set_secret(test_path, test_val, test_pass).unwrap();
-        let contents = super::get_secret(test_path, test_pass).unwrap();
-        assert_eq!(contents, test_val);
+        assert_eq!(super::get_secret(test_path, test_pass).unwrap(), test_val);
         super::remove_secret(test_path, test_pass).unwrap();
-        let error = super::get_secret(test_path, test_pass).unwrap_err();
-        assert_eq!(error, super::SecretError::NonExistentPath);
-        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
-        drop(lock);
+        let error = Err(super::SecretError::NonExistentPath);
+        assert_eq!(super::get_secret(test_path, test_pass), error);
+        fs::remove_dir_all(LOCK_DIR).unwrap();
     }
 
     #[test]
     fn should_not_remove_non_existent_secret_path() {
-        let lock = DIR_LOCK.lock().unwrap();
+        let _lock = DIR_LOCK.lock().unwrap();
         let (test_path, test_pass) = ("dir1/fil1", "1234");
-        let error = super::remove_secret(test_path, test_pass).unwrap_err();
-        assert_eq!(error, super::SecretError::NonExistentPath);
-        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
-        drop(lock);
+        let error = Err(super::SecretError::NonExistentPath);
+        assert_eq!(super::remove_secret(test_path, test_pass), error);
     }
 
     #[test]
-    fn should_list_secret_paths() {
-        let lock = DIR_LOCK.lock().unwrap();
+    fn should_list_secret_paths_same_level() {
+        let _lock = DIR_LOCK.lock().unwrap();
         super::set_secret("dir1/fil1", "cont1", "1234").unwrap();
         super::set_secret("dir1/fil2", "cont2", "1234").unwrap();
         super::set_secret("dir1/sdir/fil3", "cont4", "1234").unwrap();
@@ -255,13 +245,12 @@ mod test {
         let list = super::list_secret_paths("dir1/*", "1234").unwrap()
             .into_sorted();
         assert_eq!(list, ["dir1/fil1", "dir1/fil2", "dir1/sdir/"]);
-        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
-        drop(lock);
+        fs::remove_dir_all(LOCK_DIR).unwrap();
     }
 
     #[test]
     fn should_list_secret_paths_recursive() {
-        let lock = DIR_LOCK.lock().unwrap();
+        let _lock = DIR_LOCK.lock().unwrap();
         super::set_secret("dir1/fil1", "cont1", "1234").unwrap();
         super::set_secret("dir1/fil2", "cont2", "1234").unwrap();
         super::set_secret("dir1/sdir/fil3", "cont4", "1234").unwrap();
@@ -269,7 +258,62 @@ mod test {
         let list = super::list_secret_paths("dir1/**", "1234").unwrap()
             .into_sorted();
         assert_eq!(list, ["dir1/fil1", "dir1/fil2", "dir1/sdir/fil3"]);
-        fs::remove_dir_all(LOCK_DIR).unwrap_or_default();
-        drop(lock);
+        fs::remove_dir_all(LOCK_DIR).unwrap();
+    }
+
+    #[test]
+    fn should_set_secret_files() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let lock_dir = Path::new(LOCK_DIR);
+        let unlock_dir = Path::new(UNLOCK_DIR);
+        let (test_path, test_val, test_pass) = ("path", "contents", "1234");
+        fs::create_dir_all(unlock_dir).unwrap();
+        fs::write(unlock_dir.join(test_path), test_val).unwrap();
+        let matched = super::set_secret_files(test_path, test_pass).unwrap();
+        assert_eq!(matched, [test_path]);
+        assert!(fs::read(lock_dir.join("000.vlt")).is_ok());
+        assert!(fs::read(lock_dir.join("index.vlt")).is_ok());
+        assert!(fs::read(lock_dir.join("index.crc")).is_ok());
+        fs::remove_dir_all(lock_dir).unwrap();
+        fs::remove_dir_all(unlock_dir).unwrap();
+    }
+
+    #[test]
+    fn should_get_existent_secret_files() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let lock_dir = Path::new(LOCK_DIR);
+        let unlock_dir = Path::new(UNLOCK_DIR);
+        let (test_path, test_val, test_pass) = ("path", "contents", "1234");
+        let test_path_full = unlock_dir.join(test_path);
+        fs::create_dir_all(unlock_dir).unwrap();
+        fs::write(&test_path_full, test_val).unwrap();
+        assert!(super::set_secret_files(test_path, test_pass).is_ok());
+        fs::remove_file(&test_path_full).unwrap();
+        let matched = super::get_secret_files(test_path, test_pass).unwrap();
+        assert_eq!(matched, [test_path]);
+        assert_eq!(fs::read_to_string(test_path_full).unwrap(), test_val);
+        fs::create_dir_all(lock_dir).unwrap();
+        fs::remove_dir_all(unlock_dir).unwrap();
+    }
+
+    #[test]
+    fn should_not_get_non_existent_secret_files() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let matched = super::get_secret_files("path", "1234").unwrap();
+        assert_eq!(matched, [] as [&str; 0]);
+        assert!(fs::read_dir(LOCK_DIR).is_err());
+        assert!(fs::read_dir(UNLOCK_DIR).is_err());
+    }
+
+    #[test]
+    fn should_clear_specified_files() {
+        let _lock = DIR_LOCK.lock().unwrap();
+        let unlock_dir = Path::new(UNLOCK_DIR);
+        let (test_path, test_val) = ("path", "contents");
+        let test_path_full = unlock_dir.join(test_path);
+        fs::create_dir_all(unlock_dir).unwrap();
+        fs::write(&test_path_full, test_val).unwrap();
+        assert_eq!(super::clear_secret_files("**"), [test_path]);
+        assert!(fs::read_dir(unlock_dir).is_err())
     }
 }
