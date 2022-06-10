@@ -11,6 +11,7 @@ orion = "0.16"
 rpassword = "5.0"
 serde = "1.0"
 serde_json = "1.0"
+termion = "1.5"
 zip = { version = "0.6", default-features = false }
 
 [dev-dependencies]

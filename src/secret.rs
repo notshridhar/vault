@@ -288,7 +288,7 @@ mod test {
             assert!(fs::read(lock_dir.join("000.vlt")).is_ok());
             assert!(fs::read(lock_dir.join("index.vlt")).is_ok());
             assert!(fs::read(lock_dir.join("index.crc")).is_ok());
-        })        
+        })
     }
 
     #[test]

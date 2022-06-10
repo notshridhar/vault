@@ -9,7 +9,6 @@ login
 
 Todo
 ---
-write help
 write docs
 implement password salt (static in a location)
 implement password mask - easier to change password

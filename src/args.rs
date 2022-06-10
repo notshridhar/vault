@@ -34,7 +34,8 @@ impl ParsedArgs {
                 // manage optional value without equal sign
                 // example: app val1 --opt2 [val2]
                 let value = options.get_mut(&arg_key).unwrap();
-                *value = arg.to_owned();
+                if !value.is_empty() { value.push_str(" ") }
+                value.push_str(arg)
             }
         }
         Self { options }
@@ -131,7 +132,7 @@ mod test {
 
     #[test]
     fn should_parse_arg_list_with_named() {
-        let command = "vlt get --force --key val --key1 a,b --key2=val";
+        let command = "vlt get --force --key val --key1 a b --key2=val";
         let args_list = get_args_from_command(command);
         let args = super::ParsedArgs::from_args(&args_list);
         assert_eq!(args.get_index(0), Some("vlt"));
@@ -139,7 +140,7 @@ mod test {
         assert_eq!(args.get_index(2), None);
         assert_eq!(args.get_value("force"), Some(""));
         assert_eq!(args.get_value("key"), Some("val"));
-        assert_eq!(args.get_value("key1"), Some("a,b"));
+        assert_eq!(args.get_value("key1"), Some("a b"));
         assert_eq!(args.get_value("key2"), Some("val"));
         assert_eq!(args.get_value("forc"), None);
     }
