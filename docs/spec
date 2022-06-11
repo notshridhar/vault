@@ -9,6 +9,6 @@ login
 
 Todo
 ---
-formatting / linting / clippy
+formatting / linting
 implement password salt (static in a location)
 implement password mask - easier to change password

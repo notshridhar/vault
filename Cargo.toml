@@ -3,6 +3,7 @@ name = "vault"
 version = "0.3.0"
 authors = ["shridhar hegde <shridhar.me.003@gmail.com>"]
 edition = "2021"
+rust-version = "1.60"
 
 [dependencies]
 chrono = "0.4"

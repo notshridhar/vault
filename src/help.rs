@@ -6,7 +6,7 @@ pub fn get_help_string(specs: &[(&str, &str)]) -> String {
         .iter()
         .filter(|(name, _)| name != &"_section")
         .fold(0, |max, (name, _)| cmp::max(name.len(), max));
-        
+
     specs
         .iter()
         .enumerate()

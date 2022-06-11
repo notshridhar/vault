@@ -106,7 +106,7 @@ where P: AsRef<Path> {
 /// Removes all the files matching the given pattern.
 /// Returns sorted list of matched files which were removed.
 /// - If the directory does not exist, returns empty list.
-/// 
+///
 /// ## Patterns
 /// - `"pat"` matches only `"pat"`, but not `"path"`.
 /// - `"pat*"` matches `"pat", "path"`, but not `"pat/some"`.

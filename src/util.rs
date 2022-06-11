@@ -5,7 +5,7 @@ pub trait VecExt<T> {
     /// Sorts the collection.
     /// Returns the modified collection.
     fn into_sorted(self) -> Self;
-    
+
     /// Appends an element to the back of a collection.
     /// Returns the modified collection.
     fn push_inplace(self, item: T) -> Self;

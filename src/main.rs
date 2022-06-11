@@ -5,7 +5,6 @@ mod crypto;
 mod glob;
 mod help;
 mod secret;
-mod term;
 mod util;
 mod zip;
 
@@ -77,11 +76,6 @@ where I: IntoIterator<Item = S>, S: AsRef<str> {
     let args = ParsedArgs::from_iter(args);
 
     match args.get_index(1) {
-        Some("login") => {
-            // let password = prompt_password();
-            /* login */
-            Ok("".to_owned())
-        }
         Some("get") => {
             let path = args.expect_index(2, "path")?;
             args.expect_none_except(..=2, &[])?;
