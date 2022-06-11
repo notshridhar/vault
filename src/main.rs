@@ -5,6 +5,7 @@ mod crypto;
 mod glob;
 mod help;
 mod secret;
+mod term;
 mod util;
 mod zip;
 
@@ -15,8 +16,8 @@ use crate::crc::CrcMismatchError;
 use crate::secret::SecretError;
 use std::io::Write;
 
-const VERSION: &'static str = "0.3";
-const HELP_SPECS: &[(&'static str, &'static str)] = &[
+const VERSION: &str = "0.3";
+const HELP_SPECS: &[(&str, &str)] = &[
     ("_section", "usage"),
     ("", "vault [options] command args"),
     ("_section", "commands"),
@@ -70,14 +71,17 @@ fn prompt_password() -> String {
     }
 }
 
-/// Testable entry point for the application. Direct input and output to
-/// stdin and stdout should not be done here.
+/// Testable entry point for the application.
 fn main_app<I, S>(args: I) -> Result<String, VaultCliError>
 where I: IntoIterator<Item = S>, S: AsRef<str> {
     let args = ParsedArgs::from_iter(args);
 
     match args.get_index(1) {
-        // "login" => { /* login */ }
+        Some("login") => {
+            // let password = prompt_password();
+            /* login */
+            Ok("".to_owned())
+        }
         Some("get") => {
             let path = args.expect_index(2, "path")?;
             args.expect_none_except(..=2, &[])?;
@@ -161,7 +165,7 @@ where I: IntoIterator<Item = S>, S: AsRef<str> {
 }
 
 /// Actual entry point for the application.
-fn main() -> () {
+fn main() {
     match main_app(std::env::args()) {
         Ok(stdout) => if !stdout.is_empty() {
             println!("{}", stdout);

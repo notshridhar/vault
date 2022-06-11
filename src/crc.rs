@@ -48,7 +48,7 @@ fn read_crc_file<P: AsRef<Path>>(root_dir: P) -> CrcMap {
 
 /// Writes crc map into an index file in the given directory.
 /// - If the given directory does not exist, new one is created.
-fn write_crc_file<P: AsRef<Path>>(crc_map: &CrcMap, root_dir: P) -> () {
+fn write_crc_file<P: AsRef<Path>>(crc_map: &CrcMap, root_dir: P) {
     let crc_file_path = root_dir.as_ref().join("index.crc");
     let contents = serde_json::to_string(crc_map).unwrap();
     fs::create_dir_all(root_dir).unwrap();
@@ -73,7 +73,7 @@ where P: AsRef<Path>, Q: AsRef<Path> {
 }
 
 /// Computes crc checksum for the given path and updates the stored value.
-pub fn update_crc<P, Q>(path: P, root_dir: Q) -> ()
+pub fn update_crc<P, Q>(path: P, root_dir: Q)
 where P: AsRef<Path>, Q: AsRef<Path> {
     let mut stored_crc = read_crc_file(&root_dir);
     match compute_crc(&path) {
@@ -113,7 +113,7 @@ pub fn check_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcResult<()> {
 
 /// Computes crc checksum for all the files in the given directory and
 /// updates the corresponding stored values.
-pub fn update_crc_all<P: AsRef<Path>>(root_dir: P) -> () {
+pub fn update_crc_all<P: AsRef<Path>>(root_dir: P) {
     let computed_crc = compute_crc_all(&root_dir);
     write_crc_file(&computed_crc, root_dir)
 }

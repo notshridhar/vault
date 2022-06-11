@@ -71,8 +71,8 @@ fn remove_empty_dirs<P: AsRef<Path>>(dir: P) -> bool {
 /// - `"pat**"` matches all `"pat", "path", "pat/some"`.
 pub fn get_matching_files<P>(pattern: &str, working_dir: P) -> Vec<PathBuf>
 where P: AsRef<Path> {
-    if pattern.ends_with("*") {
-        let prefix = pattern.trim_end_matches("*");
+    if pattern.ends_with('*') {
+        let prefix = pattern.trim_end_matches('*');
         let path_parent = match Path::new(prefix).parent() {
             Some(parent) => working_dir.as_ref().join(parent),
             None => working_dir.as_ref().to_path_buf(),
@@ -141,8 +141,8 @@ where I: Iterator<Item = S>, S: AsRef<str> {
             }
         });
         iter_mapped.collect::<Vec<_>>().into_sorted()
-    } else if pattern.ends_with("*") {
-        let prefix = pattern.strip_suffix("*").unwrap();
+    } else if pattern.ends_with('*') {
+        let prefix = pattern.strip_suffix('*').unwrap();
         let pat_levels = prefix.matches('/').count();
         let iter_mapped = iter.filter_map(|item| {
             let item_ref = item.as_ref();

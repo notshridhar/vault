@@ -16,16 +16,19 @@ pub trait VecExt<T> {
 }
 
 impl<T: Ord> VecExt<T> for Vec<T> {
+    #[inline(always)]
     fn into_sorted(mut self) -> Self {
         self.sort();
         self
     }
 
+    #[inline(always)]
     fn push_inplace(mut self, item: T) -> Self {
         self.push(item);
         self
     }
 
+    #[inline(always)]
     fn extend_inplace<I: IntoIterator<Item = T>>(mut self, iter: I) -> Self {
         self.extend(iter);
         self
@@ -44,10 +47,12 @@ pub trait PathExt {
 }
 
 impl<P: AsRef<Path>> PathExt for P {
+    #[inline(always)]
     fn to_path_str(&self) -> &str {
         self.as_ref().to_str().unwrap()
     }
 
+    #[inline(always)]
     fn to_filename_str(&self) -> &str {
         self.as_ref().file_name().unwrap().to_str().unwrap()
     }

@@ -41,7 +41,7 @@ type SecretResult<T> = Result<T, SecretError>;
 fn read_index_file<P>(path: P, pass: &str) -> SecretResult<IndexMap>
 where P: AsRef<Path> {
     crypto::read_file_de(path, pass)
-        .map(|val| val.unwrap_or(HashMap::new()))
+        .map(|val| val.unwrap_or_default())
         .map_err(|err| err.into())
 }
 
@@ -83,7 +83,7 @@ pub fn get_secret(path: &str, pass: &str) -> SecretResult<String> {
         let enc_path = lock_file_path!(enc_index);
         crc::check_crc(&enc_path, LOCK_DIR)?;
         let contents = crypto::read_file_str(enc_path, pass)?;
-        Ok(contents.unwrap_or("<byte>".to_owned()))
+        Ok(contents.unwrap_or_else(|| "<byte>".to_owned()))
     } else {
         Err(SecretError::NonExistentPath)
     }

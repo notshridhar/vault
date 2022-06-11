@@ -2,7 +2,6 @@ use orion::aead;
 use orion::errors::UnknownCryptoError;
 use serde::ser::Serialize;
 use serde::de::DeserializeOwned;
-use serde_json;
 use std::fs;
 use std::path::Path;
 

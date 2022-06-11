@@ -38,7 +38,7 @@ impl ParsedArgs {
                 // manage optional value without equal sign
                 // example: app val1 --opt2 [val2]
                 let value = options.get_mut(&arg_key).unwrap();
-                if !value.is_empty() { value.push_str(" ") }
+                if !value.is_empty() { value.push(' ') }
                 value.push_str(arg_ref)
             }
         }
@@ -63,7 +63,7 @@ impl ParsedArgs {
     /// Returns `ParserError` otherwise.
     pub fn expect_index(&self, index: u16, key: &str) -> ParserResult<&str> {
         self.get_index(index)
-            .ok_or(ParserError::missing_value(key))
+            .ok_or_else(|| ParserError::missing_value(key))
     }
 
     /// Ensures there are no unexpected keys or indices.
@@ -81,9 +81,9 @@ impl ParsedArgs {
                     key.parse::<u16>().is_err() &&
                     !keys.contains(&key.as_str())
                 )
-                .map(|key| ParserError::invalid_key(key))
+                .map(ParserError::invalid_key)
                 .next()
-                .map_or(Ok(()), |err| Err(err))
+                .map_or(Ok(()), Err)
         }
     }
 }

@@ -3,21 +3,21 @@ use std::cmp;
 /// Generates formatted help string from given specs.
 pub fn get_help_string(specs: &[(&str, &str)]) -> String {
     let space = specs
-        .into_iter()
+        .iter()
         .filter(|(name, _)| name != &"_section")
         .fold(0, |max, (name, _)| cmp::max(name.len(), max));
         
     specs
-        .into_iter()
+        .iter()
         .enumerate()
         .fold(String::with_capacity(200), |mut result, (i, (name, value))| {
             if i > 0 {
-                result.push_str("\n");
+                result.push('\n');
             }
 
             if name == &"_section" {
                 result.push_str(value);
-                result.push_str(":");
+                result.push(':');
             } else if name.is_empty() {
                 result.push_str(&" ".repeat(4));
                 result.push_str(value);
@@ -30,7 +30,7 @@ pub fn get_help_string(specs: &[(&str, &str)]) -> String {
 
             let next_name = specs.get(i + 1).map_or("", |item| item.0);
             if next_name == "_section" {
-                result.push_str("\n");
+                result.push('\n');
             }
 
             result
