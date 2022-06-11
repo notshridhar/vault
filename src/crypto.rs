@@ -8,28 +8,22 @@ use std::path::Path;
 
 type CryptoResult<T> = Result<T, UnknownCryptoError>;
 
-pub fn encrypt(data: &[u8], pass: &str) -> CryptoResult<Vec<u8>> {
+/// Encrypts a stream of bytes using the given password.
+fn encrypt(data: &[u8], pass: &str) -> CryptoResult<Vec<u8>> {
     let password = format!("{:0>32}", pass);
     let secret_key = aead::SecretKey::from_slice(password.as_bytes())?;
     aead::seal(&secret_key, data)
 }
 
-pub fn decrypt(data: &[u8], pass: &str) -> CryptoResult<Vec<u8>> {
+/// Decrypts a stream of bytes using the given password.
+/// - If the password does not match, returns `UnknownCryptoError`.
+fn decrypt(data: &[u8], pass: &str) -> CryptoResult<Vec<u8>> {
     let password = format!("{:0>32}", pass);
     let secret_key = aead::SecretKey::from_slice(password.as_bytes())?;
     aead::open(&secret_key, data)
 }
 
-pub fn read_file_str<P>(path: P, pass: &str) -> CryptoResult<Option<String>>
-where P: AsRef<Path> {
-    if let Ok(contents_enc) = fs::read(path) {
-        let contents_raw = decrypt(&contents_enc, pass)?;
-        Ok(String::from_utf8(contents_raw).ok())
-    } else {
-        Ok(None)
-    }
-}
-
+/// Writes out the string contents to encrypted file using the given password.
 pub fn write_file_str<P>(path: P, val: &str, pass: &str) -> CryptoResult<()>
 where P: AsRef<Path> {
     let contents_enc = encrypt(val.as_bytes(), pass)?;
@@ -40,18 +34,37 @@ where P: AsRef<Path> {
     Ok(())
 }
 
-pub fn read_file_de<P, D>(path: P, pass: &str) -> CryptoResult<Option<D>>
-where P: AsRef<Path>, D: DeserializeOwned {
-    read_file_str(path, pass)
-        .map(|res| res.map(|val| serde_json::from_str(&val).unwrap()))
+/// Reads the string contents of an encrypted file using the given password.
+/// - If the file cannot be read or contains non-utf-8 values, returns `None`.
+/// - If the password does not match, returns `UnknownCryptoError`.
+pub fn read_file_str<P>(path: P, pass: &str) -> CryptoResult<Option<String>>
+where P: AsRef<Path> {
+    if let Ok(contents_enc) = fs::read(path) {
+        let contents_raw = decrypt(&contents_enc, pass)?;
+        Ok(String::from_utf8(contents_raw).ok())
+    } else {
+        Ok(None)
+    }
 }
 
+/// Writes out the serialized value to encrypted file using the given password.
 pub fn write_file_ser<P, S>(path: P, val: S, pass: &str) -> CryptoResult<()>
 where P: AsRef<Path>, S: Serialize {
     let val_str = serde_json::to_string(&val).unwrap();
     write_file_str(path, &val_str, pass)
 }
 
+/// Reads the deserialized value of an encrypted file using the given password.
+/// - If the file cannot be read or contains non-utf-8 values, returns `None`.
+/// - If the password does not match, returns `UnknownCryptoError`.
+pub fn read_file_de<P, D>(path: P, pass: &str) -> CryptoResult<Option<D>>
+where P: AsRef<Path>, D: DeserializeOwned {
+    read_file_str(path, pass)
+        .map(|res| res.map(|val| serde_json::from_str(&val).unwrap()))
+}
+
+/// Encrypts contents of src file into the dest file using the given password.
+/// Doing so creates or updates the dest file, so the src file is not affected.
 pub fn encrypt_file<P, Q>(src: P, dest: Q, pass: &str) -> CryptoResult<()>
 where P: AsRef<Path>, Q: AsRef<Path> {
     let contents_raw = fs::read(src).unwrap();
@@ -63,6 +76,9 @@ where P: AsRef<Path>, Q: AsRef<Path> {
     Ok(())
 }
 
+/// Decrypts contents of src file into the dest file using the given password.
+/// Doing so creates or updates the dest file, so the src file is not affected.
+/// - If the password does not match, returns `UnknownCryptoError`.
 pub fn decrypt_file<P, Q>(src: P, dest: Q, pass: &str) -> CryptoResult<()>
 where P: AsRef<Path>, Q: AsRef<Path> {
     let contents_enc = fs::read(src).unwrap();

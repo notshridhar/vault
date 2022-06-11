@@ -1,4 +1,4 @@
-use crate::util::PathExt;
+use crate::util::{PathExt, VecExt};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -6,6 +6,8 @@ use zip::ZipWriter;
 use zip::result::ZipResult;
 use zip::write::FileOptions;
 
+/// Zips all the files or directories given into a file.
+/// Returns sorted list of zipped file paths.
 pub fn zip_files<P, Q>(path: P, include: &[Q]) -> ZipResult<Vec<String>>
 where P: AsRef<Path>, Q: AsRef<Path> {
     let archive = fs::File::create(path).unwrap();
@@ -29,7 +31,7 @@ where P: AsRef<Path>, Q: AsRef<Path> {
         }
     }
     zip.finish()?;
-    Ok(zipped_paths)
+    Ok(zipped_paths.into_sorted())
 }
 
 #[cfg(test)]

@@ -8,27 +8,36 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 
+/// Returns the path to the index file.
 macro_rules! index_file_path {
     () => {
         Path::new(LOCK_DIR).join("index.vlt")
     }
 }
 
+/// Returns the path to the encrypted file with the given index.
 macro_rules! lock_file_path {
     ($index:expr) => {
         Path::new(LOCK_DIR).join(format!("{:0>3}.vlt", $index))
     }
 }
 
+/// Returns the path to the decrypted file with the given relative path.
 macro_rules! unlock_file_path {
     ($path:expr) => {
         Path::new(UNLOCK_DIR).join($path)
     }
 }
 
+/// Hashmap that maps secret paths to numbers.
+/// These numbers can be used to identify encrypted files.
 type IndexMap = HashMap<String, u16>;
+
 type SecretResult<T> = Result<T, SecretError>;
 
+/// Reads the contents of the index file into a hashmap.
+/// - If the file does not exist, returns an empty map.
+/// - If the password is incorrect, returns `IncorrectPassword`.
 fn read_index_file<P>(path: P, pass: &str) -> SecretResult<IndexMap>
 where P: AsRef<Path> {
     crypto::read_file_de(path, pass)
@@ -36,23 +45,27 @@ where P: AsRef<Path> {
         .map_err(|err| err.into())
 }
 
+/// Writes out the hashmap into the index file.
 fn write_index_file<P>(path: P, map: &IndexMap, pass: &str) -> SecretResult<()>
 where P: AsRef<Path> {
     crypto::write_file_ser(path, map, pass)
         .map_err(|err| err.into())
 }
 
+/// Reserves an index for a path in the given hashmap.
+/// The least available index is reserved.
 fn reserve_index(map: &mut IndexMap, path: &str) -> u16 {
-    let new_index = map.values()
+    let new_index = 1 + map.values()
         .map(|value| value.to_owned())
         .collect::<Vec<_>>()
         .into_sorted()
         .into_iter()
-        .fold(0, |accum, val| if accum + 1 == val { val } else { accum });
+        .fold(0, |accum, val| accum + (accum + 1 == val) as u16);
     map.insert(path.to_owned(), new_index);
     new_index
 }
 
+/// Gets the index for the given path, or reserves it otherwise.
 fn get_or_reserve_index(map: &mut IndexMap, path: &str) -> u16 {
     match map.get(path) {
         Some(value) => value.to_owned(),
@@ -60,6 +73,10 @@ fn get_or_reserve_index(map: &mut IndexMap, path: &str) -> u16 {
     }
 }
 
+/// Returns the secret contents for the given path.
+/// - If the path does not exist, returns `NonExistentPath`.
+/// - If the password is incorrect, returns `IncorrectPassword`.
+/// - If the checksum verification fails, returns `CrcMismatch`.
 pub fn get_secret(path: &str, pass: &str) -> SecretResult<String> {
     let index_map = read_index_file(index_file_path!(), pass)?;
     if let Some(enc_index) = index_map.get(path) {
@@ -72,6 +89,8 @@ pub fn get_secret(path: &str, pass: &str) -> SecretResult<String> {
     }
 }
 
+/// Sets the secret contents for the given path.
+/// - If the password is incorrect, returns `IncorrectPassword`.
 pub fn set_secret(path: &str, contents: &str, pass: &str) -> SecretResult<()> {
     let index_path = index_file_path!();
     let mut index_map = read_index_file(&index_path, pass)?;
@@ -83,6 +102,9 @@ pub fn set_secret(path: &str, contents: &str, pass: &str) -> SecretResult<()> {
     Ok(())
 }
 
+/// Removes the secret contents from the given path.
+/// - If the path does not exist, returns `NonExistentPath`.
+/// - If the password is incorrect, returns `IncorrectPassword`.
 pub fn remove_secret(path: &str, pass: &str) -> SecretResult<()> {
     let index_path = index_file_path!();
     let mut index_map = read_index_file(&index_path, pass)?;
@@ -98,11 +120,17 @@ pub fn remove_secret(path: &str, pass: &str) -> SecretResult<()> {
     }
 }
 
+/// Lists all the secret paths matching the given pattern.
+/// - If the password is incorrect, returns `IncorrectPassword`.
 pub fn list_secret_paths(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     let index_map = read_index_file(index_file_path!(), pass)?;
     Ok(glob::filter_matching(index_map.into_keys(), pat))
 }
 
+/// Decrypts the secret contents of paths matching the given pattern and
+/// writes them into corresponding files in `unlock` directory.
+/// - If the password is incorrect, returns `IncorrectPassword`.
+/// - If the checksum verification fails, returns `CrcMismatch`.
 pub fn get_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     let index_map = read_index_file(index_file_path!(), pass)?;
     let matched_paths = glob::filter_matching(index_map.keys(), pat);
@@ -116,6 +144,9 @@ pub fn get_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     }))
 }
 
+/// Encrypts the contents of paths matching the given pattern and
+/// writes them into corresponding secret files in `lock` directory.
+/// - If the password is incorrect, returns `IncorrectPassword`.
 pub fn set_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     let index_path = index_file_path!();
     let mut index_map = read_index_file(&index_path, pass)?;
@@ -132,17 +163,13 @@ pub fn set_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     }))
 }
 
+/// Removes all files matching the given pattern in the `unlock` directory.
+/// Using this is recommended to clean up decrypted files after their usage.
 pub fn clear_secret_files(pat: &str) -> Vec<String> {
     glob::remove_matching_files(pat, UNLOCK_DIR)
         .into_iter()
         .map(|path| path.to_path_str().to_owned())
         .collect()
-}
-
-#[derive(Debug, PartialEq)]
-pub struct SecretInfo {
-    pub path: String,
-    pub contents: String,
 }
 
 #[derive(Debug, PartialEq)]
@@ -167,8 +194,8 @@ impl From<UnknownCryptoError> for SecretError {
 #[cfg(test)]
 mod test {
     use crate::constants::{LOCK_DIR, UNLOCK_DIR};
-    use crate::util::VecExt;
     use once_cell::sync::Lazy;
+    use std::collections::HashMap;
     use std::fs;
     use std::panic;
     use std::path::Path;
@@ -189,11 +216,37 @@ mod test {
     }
 
     #[test]
+    fn should_reserve_zero_in_empty_map() {
+        let mut map = HashMap::new();
+        assert_eq!(super::reserve_index(&mut map, "key"), 1);
+    }
+
+    #[test]
+    fn should_reserve_mid_in_sparse_map() {
+        let mut map = HashMap::from([
+            ("key1".to_owned(), 1),
+            ("key2".to_owned(), 2),
+            ("key3".to_owned(), 4),
+        ]);
+        assert_eq!(super::reserve_index(&mut map, "key4"), 3);
+    }
+
+    #[test]
+    fn should_reserve_last_in_full_map() {
+        let mut map = HashMap::from([
+            ("key1".to_owned(), 1),
+            ("key2".to_owned(), 2),
+            ("key3".to_owned(), 3),
+        ]);
+        assert_eq!(super::reserve_index(&mut map, "key4"), 4);
+    }
+
+    #[test]
     fn should_set_secret() {
         let root_dir = Path::new(LOCK_DIR);
         run_test(|| {
             super::set_secret("dir1/fil1", "cont1", "1234").unwrap();
-            assert!(fs::read(root_dir.join("000.vlt")).is_ok());
+            assert!(fs::read(root_dir.join("001.vlt")).is_ok());
             assert!(fs::read(root_dir.join("index.vlt")).is_ok());
             assert!(fs::read(root_dir.join("index.crc")).is_ok());
         })
@@ -256,9 +309,8 @@ mod test {
             super::set_secret("dir1/fil2", test_val, pass).unwrap();
             super::set_secret("dir1/sdir/fil3", test_val, pass).unwrap();
             super::set_secret("dir2/fil1", test_val, pass).unwrap();
-            let list = super::list_secret_paths("dir1/*", pass).unwrap()
-                .into_sorted();
-            assert_eq!(list, ["dir1/fil1", "dir1/fil2", "dir1/sdir/"]);
+            let list = super::list_secret_paths("dir1/*", pass).unwrap();
+            assert_eq!(list, ["dir1/fil1", "dir1/fil2"]);
         })
     }
 
@@ -267,12 +319,10 @@ mod test {
         let (test_val, pass) = ("contents", "1234");
         run_test(|| {
             super::set_secret("dir1/fil1", test_val, pass).unwrap();
-            super::set_secret("dir1/fil2", test_val, pass).unwrap();
             super::set_secret("dir1/sdir/fil3", test_val, pass).unwrap();
             super::set_secret("dir2/fil1", test_val, pass).unwrap();
-            let list = super::list_secret_paths("dir1/**", pass).unwrap()
-                .into_sorted();
-            assert_eq!(list, ["dir1/fil1", "dir1/fil2", "dir1/sdir/fil3"]);
+            let list = super::list_secret_paths("dir1/**", pass).unwrap();
+            assert_eq!(list, ["dir1/fil1", "dir1/sdir/fil3"]);
         })
     }
 
@@ -285,7 +335,7 @@ mod test {
             fs::write(unlock_dir.join(test_path), test_val).unwrap();
             let matched = super::set_secret_files(test_path, pass).unwrap();
             assert_eq!(matched, [test_path]);
-            assert!(fs::read(lock_dir.join("000.vlt")).is_ok());
+            assert!(fs::read(lock_dir.join("001.vlt")).is_ok());
             assert!(fs::read(lock_dir.join("index.vlt")).is_ok());
             assert!(fs::read(lock_dir.join("index.crc")).is_ok());
         })

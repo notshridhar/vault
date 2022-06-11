@@ -1,18 +1,45 @@
 use std::path::Path;
 
+/// Extension trait for `Vec` collection
 pub trait VecExt<T> {
-    fn into_sorted(self) -> Vec<T>;
+    /// Sorts the collection.
+    /// Returns the modified collection.
+    fn into_sorted(self) -> Self;
+    
+    /// Appends an element to the back of a collection.
+    /// Returns the modified collection.
+    fn push_inplace(self, item: T) -> Self;
+
+    /// Extends a collection with the contents of the iterator.
+    /// Returns the modified collection.
+    fn extend_inplace<I: IntoIterator<Item = T>>(self, iter: I) -> Self;
 }
 
 impl<T: Ord> VecExt<T> for Vec<T> {
-    fn into_sorted(mut self) -> Vec<T> {
+    fn into_sorted(mut self) -> Self {
         self.sort();
+        self
+    }
+
+    fn push_inplace(mut self, item: T) -> Self {
+        self.push(item);
+        self
+    }
+
+    fn extend_inplace<I: IntoIterator<Item = T>>(mut self, iter: I) -> Self {
+        self.extend(iter);
         self
     }
 }
 
+/// Extension trait for `Path`-like values
 pub trait PathExt {
+    /// Yields a [`&str`] slice.
+    /// Panics if the path is not valid utf-8.
     fn to_path_str(&self) -> &str;
+
+    /// Returns the final component of the Path.
+    /// Panics if the name is not valid utf-8.
     fn to_filename_str(&self) -> &str;
 }
 

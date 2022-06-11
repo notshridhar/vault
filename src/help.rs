@@ -1,13 +1,14 @@
 use std::cmp;
 
+/// Generates formatted help string from given specs.
 pub fn get_help_string(specs: &[(&str, &str)]) -> String {
     let space = specs
-        .iter()
+        .into_iter()
         .filter(|(name, _)| name != &"_section")
         .fold(0, |max, (name, _)| cmp::max(name.len(), max));
         
     specs
-        .iter()
+        .into_iter()
         .enumerate()
         .fold(String::with_capacity(200), |mut result, (i, (name, value))| {
             if i > 0 {

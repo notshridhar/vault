@@ -1,44 +1,50 @@
-use crate::util::PathExt;
-use std::collections::HashSet;
+use crate::util::{PathExt, VecExt};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-fn list_files<P: AsRef<Path>>(path: P) -> Vec<PathBuf> {
-    if let Ok(read_results) = fs::read_dir(path) {
-        read_results.filter_map(|entry| {
-            let entry_path = entry.unwrap().path();
-            match entry_path.is_file() {
-                true => Some(entry_path),
-                false => None,
-            }
-        }).collect()
+/// Lists all files in the given directory.
+/// - If the directory does not exist, returns empty list.
+fn list_files<P: AsRef<Path>>(dir: P) -> Vec<PathBuf> {
+    if let Ok(read_results) = fs::read_dir(dir) {
+        read_results
+            .filter_map(|entry| {
+                let entry_path = entry.unwrap().path();
+                match entry_path.is_file() {
+                    true => Some(entry_path),
+                    false => None,
+                }
+            })
+            .collect()
     } else {
         Vec::new()
     }
 }
 
-fn walk_dir<P: AsRef<Path>>(path: P) -> Vec<PathBuf> {
-    if let Ok(read_results) = fs::read_dir(path) {
-        let mut found_files = Vec::with_capacity(4);
-        for entry_res in read_results {
-            let entry_path = entry_res.unwrap().path();
-            match entry_path.is_dir() {
-                true => found_files.extend(walk_dir(entry_path)),
-                false => found_files.push(entry_path),
-            }
-        }
-        found_files
-    } else {
-        Vec::new()
-    }
-}
-
-fn remove_empty_dirs<P: AsRef<Path>>(working_dir: P) -> bool {
-    let removables = [".DS_Store"];
-    if let Ok(read_results) = fs::read_dir(&working_dir) {
-        let is_empty = read_results.into_iter().fold(true, |accum, item| {
+/// Lists all files in the given directory recursively.
+/// - If the directory does not exist, returns empty list.
+fn walk_dir<P: AsRef<Path>>(dir: P) -> Vec<PathBuf> {
+    if let Ok(read_results) = fs::read_dir(dir) {
+        read_results.fold(Vec::with_capacity(4), |accum, item| {
             let entry_path = item.unwrap().path();
-            accum && if entry_path.is_dir() {
+            match entry_path.is_dir() {
+                true => accum.extend_inplace(walk_dir(entry_path)),
+                false => accum.push_inplace(entry_path),
+            }
+        })
+    } else {
+        Vec::new()
+    }
+}
+
+/// Removes all empty directories recursively within the given directory.
+/// Returns whether the given directory was completely removed.
+/// Also removes some commonly found system cache files in the process.
+fn remove_empty_dirs<P: AsRef<Path>>(dir: P) -> bool {
+    let removables = [".DS_Store"];
+    if let Ok(read_results) = fs::read_dir(&dir) {
+        let is_empty = read_results.fold(true, |accum, item| {
+            let entry_path = item.unwrap().path();
+            let is_removed = if entry_path.is_dir() {
                 remove_empty_dirs(entry_path)
             } else {
                 let file_name = entry_path.to_filename_str();
@@ -46,15 +52,23 @@ fn remove_empty_dirs<P: AsRef<Path>>(working_dir: P) -> bool {
                     true => fs::remove_file(entry_path).is_ok(),
                     false => false,
                 }
-            }
+            };
+            is_removed && accum
         });
-        fs::remove_dir(working_dir).unwrap_or_default();
+        fs::remove_dir(dir).unwrap_or_default();
         is_empty
     } else {
         true
     }
 }
 
+/// Lists all the files matching the given pattern in alphabetical order.
+/// - If the directory does not exist, returns empty list.
+///
+/// ## Patterns
+/// - `"pat"` matches only `"pat"`, but not `"path"`.
+/// - `"pat*"` matches `"pat", "path"`, but not `"pat/some"`.
+/// - `"pat**"` matches all `"pat", "path", "pat/some"`.
 pub fn get_matching_files<P>(pattern: &str, working_dir: P) -> Vec<PathBuf>
 where P: AsRef<Path> {
     if pattern.ends_with("*") {
@@ -67,81 +81,92 @@ where P: AsRef<Path> {
             true => walk_dir(path_parent),
             false => list_files(path_parent),
         };
-        file_list.into_iter().filter_map(|path| {
-            let path_rel = path.strip_prefix(&working_dir).unwrap();
-            match path_rel.to_path_str().starts_with(prefix) {
-                true => Some(path_rel.to_owned()),
-                false => None,
-            }
-        }).collect()
+        file_list
+            .into_iter()
+            .filter_map(|path| {
+                let path_rel = path.strip_prefix(&working_dir).unwrap();
+                match path_rel.to_path_str().starts_with(prefix) {
+                    true => Some(path_rel.to_owned()),
+                    false => None,
+                }
+            })
+            .collect::<Vec<_>>()
+            .into_sorted()
     } else {
         match fs::metadata(working_dir.as_ref().join(pattern)) {
             Ok(meta) => match meta.is_file() {
                 true => [Path::new(pattern).to_path_buf()].to_vec(),
                 false => Vec::new()
             },
-            Err(_) => Vec::new()
+            Err(_) => Vec::new(),
         }
     }
 }
 
+/// Removes all the files matching the given pattern.
+/// Returns sorted list of matched files which were removed.
+/// - If the directory does not exist, returns empty list.
+/// 
+/// ## Patterns
+/// - `"pat"` matches only `"pat"`, but not `"path"`.
+/// - `"pat*"` matches `"pat", "path"`, but not `"pat/some"`.
+/// - `"pat**"` matches all `"pat", "path", "pat/some"`.
 pub fn remove_matching_files<P>(pattern: &str, working_dir: P) -> Vec<PathBuf>
 where P: AsRef<Path> {
     let matched_pathbufs = get_matching_files(pattern, &working_dir);
-    matched_pathbufs.iter().for_each(|path| {
-        fs::remove_file(working_dir.as_ref().join(path)).unwrap()
-    });
-    remove_empty_dirs(working_dir);
+    let dir_ref = working_dir.as_ref();
     matched_pathbufs
+        .iter()
+        .for_each(|path| fs::remove_file(dir_ref.join(path)).unwrap());
+    remove_empty_dirs(working_dir);
+    matched_pathbufs.into_sorted()
 }
 
+/// Lists all the items in the iterator matching the given pattern
+/// in alphabetical order.
+///
+/// ## Patterns
+/// - `"pat"` matches only `"pat"`, but not `"path"`.
+/// - `"pat*"` matches `"pat", "path"`, but not `"pat/some"`.
+/// - `"pat**"` matches all `"pat", "path", "pat/some"`.
 pub fn filter_matching<I, S>(iter: I, pattern: &str) -> Vec<String>
 where I: Iterator<Item = S>, S: AsRef<str> {
     if pattern.ends_with("**") {
         let prefix = pattern.strip_suffix("**").unwrap();
-        iter.filter_map(|item| {
+        let iter_mapped = iter.filter_map(|item| {
             let item_ref = item.as_ref();
             match item_ref.starts_with(prefix) {
                 true => Some(item_ref.to_owned()),
                 false => None
             }
-        }).collect()
+        });
+        iter_mapped.collect::<Vec<_>>().into_sorted()
     } else if pattern.ends_with("*") {
         let prefix = pattern.strip_suffix("*").unwrap();
         let pat_levels = prefix.matches('/').count();
-        let set_iter = iter.filter_map(|item| {
+        let iter_mapped = iter.filter_map(|item| {
             let item_ref = item.as_ref();
-            if item_ref.starts_with(prefix) {
-                let item_levels = item_ref.matches('/').count();
-                let dir_suffix = match item_levels == pat_levels {
-                    true => "",
-                    false => "/",
-                };
-                let item_display = item_ref
-                    .split('/')
-                    .take(pat_levels + 1)
-                    .collect::<Vec<_>>()
-                    .join("/") + dir_suffix;
-                Some(item_display)
-            } else {
-                None
-            }
-        });
-        HashSet::<String>::from_iter(set_iter).into_iter().collect()
-    } else {
-        iter.filter_map(|item| {
-            let item_ref = item.as_ref();
-            match item_ref == pattern {
+            let item_levels = item_ref.matches('/').count();
+            match item_ref.starts_with(prefix) && item_levels == pat_levels {
                 true => Some(item_ref.to_owned()),
                 false => None
             }
-        }).collect()
+        });
+        iter_mapped.collect::<Vec<_>>().into_sorted()
+    } else {
+        let iter_mapped = iter.filter_map(|item|
+            match item.as_ref() == pattern {
+                true => Some(item.as_ref().to_owned()),
+                false => None
+            }
+        );
+        iter_mapped.collect()
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::util::{VecExt, PathExt};
+    use crate::util::PathExt;
     use once_cell::sync::Lazy;
     use std::fs;
     use std::panic;
@@ -171,7 +196,6 @@ mod test {
             .into_iter()
             .map(|buf| buf.to_path_str().to_owned())
             .collect::<Vec<_>>()
-            .into_sorted()
     }
 
     #[test]
@@ -193,8 +217,8 @@ mod test {
     #[test]
     fn should_get_matching_files_recursive() {
         run_test(|| {
-            let matched = super::get_matching_files("**", GLOB_DIR);
-            assert_eq!(map_pathbuf_to_string(matched), ["f1", "f2", "sub/f3"]);
+            let matched = super::get_matching_files("sub/**", GLOB_DIR);
+            assert_eq!(map_pathbuf_to_string(matched), ["sub/f3"]);
         })
     }
 
@@ -222,13 +246,13 @@ mod test {
     fn should_filter_matching_same_level() {
         let input_names = ["f1", "f2", "sub/f3"];
         let matching = super::filter_matching(input_names.into_iter(), "*");
-        assert_eq!(matching.into_sorted(), ["f1", "f2", "sub/"]);
+        assert_eq!(matching, ["f1", "f2"]);
     }
 
     #[test]
     fn should_filter_matching_recursive() {
         let input_names = ["f1", "f2", "sub/f3"];
-        let matching = super::filter_matching(input_names.iter(), "**");
-        assert_eq!(matching.into_sorted(), input_names);
+        let matching = super::filter_matching(input_names.into_iter(), "**");
+        assert_eq!(matching, ["f1", "f2", "sub/f3"]);
     }
 }

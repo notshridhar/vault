@@ -57,6 +57,8 @@ const HELP_SPECS: &[(&'static str, &'static str)] = &[
     ("--version", "show the current version and exit"),
 ];
 
+/// Prompts for password in stdin. Clears prompt after the password is entered.
+/// In test context, this just returns a default value.
 fn prompt_password() -> String {
     if cfg!(test) {
         let pass = rpassword::prompt_password_stdout("password:").unwrap();
@@ -68,14 +70,17 @@ fn prompt_password() -> String {
     }
 }
 
-fn main_app(args_list: &[String]) -> Result<String, VaultCliError> {
-    let args = ParsedArgs::from_args(args_list);
+/// Testable entry point for the application. Direct input and output to
+/// stdin and stdout should not be done here.
+fn main_app<I, S>(args: I) -> Result<String, VaultCliError>
+where I: IntoIterator<Item = S>, S: AsRef<str> {
+    let args = ParsedArgs::from_iter(args);
 
     match args.get_index(1) {
         // "login" => { /* login */ }
         Some("get") => {
             let path = args.expect_index(2, "path")?;
-            args.expect_none_except(3, &[])?;
+            args.expect_none_except(..=2, &[])?;
             let password = prompt_password();
             let contents = secret::get_secret(path, &password)?;
             Ok(contents)
@@ -83,7 +88,7 @@ fn main_app(args_list: &[String]) -> Result<String, VaultCliError> {
         Some("set") => {
             let path = args.expect_index(2, "path")?;
             let contents_raw = args.expect_index(3, "contents")?;
-            args.expect_none_except(4, &[])?;
+            args.expect_none_except(..=3, &[])?;
             let password = prompt_password();
             let contents = &contents_raw.replace("\\n", "\n");
             secret::set_secret(path, contents, &password)?;
@@ -91,40 +96,40 @@ fn main_app(args_list: &[String]) -> Result<String, VaultCliError> {
         }
         Some("rm") => {
             let path = args.expect_index(2, "path")?;
-            args.expect_none_except(3, &[])?;
+            args.expect_none_except(..=2, &[])?;
             let password = prompt_password();
             secret::remove_secret(path, &password)?;
             Ok("ok".to_owned())
         }
         Some("ls") => {
             let pattern = args.expect_index(2, "path-pattern")?;
-            args.expect_none_except(3, &[])?;
+            args.expect_none_except(..=2, &[])?;
             let password = prompt_password();
             let matched = secret::list_secret_paths(pattern, &password)?;
             Ok(matched.join("\n"))
         }
         Some("fget") => {
             let path = args.expect_index(2, "path-pattern")?;
-            args.expect_none_except(3, &[])?;
+            args.expect_none_except(..=2, &[])?;
             let password = prompt_password();
             let matched = secret::get_secret_files(path, &password)?;
             Ok(matched.join("\n"))
         }
         Some("fset") => {
             let path = args.expect_index(2, "path-pattern")?;
-            args.expect_none_except(3, &[])?;
+            args.expect_none_except(..=2, &[])?;
             let password = prompt_password();
             let matched = secret::set_secret_files(path, &password)?;
             Ok(matched.join("\n"))
         }
         Some("fclr") => {
             let path = args.expect_index(2, "path-pattern")?;
-            args.expect_none_except(3, &[])?;
+            args.expect_none_except(..=2, &[])?;
             let matched = secret::clear_secret_files(path);
             Ok(matched.join("\n"))
         }
         Some("crc") => {
-            args.expect_none_except(2, &["force-update"])?;
+            args.expect_none_except(..=1, &["force-update"])?;
             if args.get_value("force-update").is_some() {
                 crc::update_crc_all(LOCK_DIR)
             } else {
@@ -133,7 +138,7 @@ fn main_app(args_list: &[String]) -> Result<String, VaultCliError> {
             Ok("ok".to_owned())
         }
         Some("zip") => {
-            args.expect_none_except(2, &[])?;
+            args.expect_none_except(..=1, &[])?;
             let datestamp = Local::now().format("%Y%m%d");
             let zip_name = format!("vault-{}.zip", datestamp);
             let zip_entries = &[LOCK_DIR, "vault"];
@@ -155,9 +160,9 @@ fn main_app(args_list: &[String]) -> Result<String, VaultCliError> {
     }
 }
 
+/// Actual entry point for the application.
 fn main() -> () {
-    let args_list = std::env::args().collect::<Vec<_>>();
-    match main_app(&args_list) {
+    match main_app(std::env::args()) {
         Ok(stdout) => if !stdout.is_empty() {
             println!("{}", stdout);
         }

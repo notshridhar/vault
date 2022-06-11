@@ -9,11 +9,16 @@ type CrcMap = HashMap<String, u32>;
 type CrcResult<T> = Result<T, CrcMismatchError>;
 const CRC32: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
+/// Computes crc checksum for the given file path.
+/// Returns any error while accessing the file.
 fn compute_crc<P: AsRef<Path>>(path: P) -> io::Result<u32> {
     let file_content = fs::read(path)?;
     Ok(CRC32.checksum(&file_content))
 }
 
+/// Computes crc checksum for all files in given directory (non-recursive).
+/// Returns a hashmap mapping file name to its checksum value.
+/// - If the given directory does not exist, an empty map is returned.
 fn compute_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcMap {
     if let Ok(dir_entries) = fs::read_dir(root_dir) {
         dir_entries.fold(HashMap::new(), |mut accum, entry| {
@@ -31,6 +36,9 @@ fn compute_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcMap {
     }
 }
 
+/// Reads crc map from an index file in the given directory.
+/// Returns a hashmap mapping file name to its checksum value.
+/// - If the given directory does not exist, an empty map is returned.
 fn read_crc_file<P: AsRef<Path>>(root_dir: P) -> CrcMap {
     match fs::read_to_string(root_dir.as_ref().join("index.crc")) {
         Ok(contents) => serde_json::from_str(&contents).unwrap(),
@@ -38,6 +46,8 @@ fn read_crc_file<P: AsRef<Path>>(root_dir: P) -> CrcMap {
     }
 }
 
+/// Writes crc map into an index file in the given directory.
+/// - If the given directory does not exist, new one is created.
 fn write_crc_file<P: AsRef<Path>>(crc_map: &CrcMap, root_dir: P) -> () {
     let crc_file_path = root_dir.as_ref().join("index.crc");
     let contents = serde_json::to_string(crc_map).unwrap();
@@ -45,6 +55,8 @@ fn write_crc_file<P: AsRef<Path>>(crc_map: &CrcMap, root_dir: P) -> () {
     fs::write(crc_file_path, contents).unwrap()
 }
 
+/// Compares computed crc checksum of the given path with the stored value.
+/// - If the comparison fails, returns `CrcMismatchError`.
 pub fn check_crc<P, Q>(path: P, root_dir: Q) -> CrcResult<()>
 where P: AsRef<Path>, Q: AsRef<Path> {
     let stored_crc_all = read_crc_file(root_dir);
@@ -60,6 +72,7 @@ where P: AsRef<Path>, Q: AsRef<Path> {
     }
 }
 
+/// Computes crc checksum for the given path and updates the stored value.
 pub fn update_crc<P, Q>(path: P, root_dir: Q) -> ()
 where P: AsRef<Path>, Q: AsRef<Path> {
     let mut stored_crc = read_crc_file(&root_dir);
@@ -70,6 +83,9 @@ where P: AsRef<Path>, Q: AsRef<Path> {
     write_crc_file(&stored_crc, root_dir);
 }
 
+/// Compares computed crc checksum of all files in the the given directory
+/// with the corresponding stored values.
+/// - If the comparison fails, returns `CrcMismatchError`.
 pub fn check_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcResult<()> {
     let stored_crc = read_crc_file(&root_dir);
     let computed_crc = compute_crc_all(root_dir);
@@ -95,6 +111,8 @@ pub fn check_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcResult<()> {
     }
 }
 
+/// Computes crc checksum for all the files in the given directory and
+/// updates the corresponding stored values.
 pub fn update_crc_all<P: AsRef<Path>>(root_dir: P) -> () {
     let computed_crc = compute_crc_all(&root_dir);
     write_crc_file(&computed_crc, root_dir)
