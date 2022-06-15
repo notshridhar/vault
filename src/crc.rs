@@ -40,7 +40,8 @@ fn compute_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcMap {
 /// Returns a hashmap mapping file name to its checksum value.
 /// - If the given directory does not exist, an empty map is returned.
 fn read_crc_file<P: AsRef<Path>>(root_dir: P) -> CrcMap {
-    match fs::read_to_string(root_dir.as_ref().join("index.crc")) {
+    let crc_file_path = root_dir.as_ref().join("index.crc");
+    match fs::read_to_string(crc_file_path) {
         Ok(contents) => serde_json::from_str(&contents).unwrap(),
         Err(_) => HashMap::new(),
     }
@@ -89,22 +90,23 @@ where P: AsRef<Path>, Q: AsRef<Path> {
 pub fn check_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcResult<()> {
     let stored_crc = read_crc_file(&root_dir);
     let computed_crc = compute_crc_all(root_dir);
-
-    let added_errors = computed_crc.keys().filter_map(|computed_key| {
-        match stored_crc.contains_key(computed_key) {
-            true => None,
-            false => Some(CrcMismatchError::new(computed_key)),
-        }
-    });
-
-    let diff_errors = stored_crc.keys().filter_map(|stored_key| {
-        let stored_value = stored_crc.get(stored_key).unwrap();
-        match computed_crc.get(stored_key) {
-            Some(computed_value) if computed_value == stored_value => None,
-            _ => Some(CrcMismatchError::new(stored_key)),
-        }
-    });
-
+    let added_errors = computed_crc
+        .keys()
+        .filter_map(|computed_key| {
+            match stored_crc.contains_key(computed_key) {
+                true => None,
+                false => Some(CrcMismatchError::new(computed_key)),
+            }
+        });
+    let diff_errors = stored_crc
+        .keys()
+        .filter_map(|stored_key| {
+            let stored_value = stored_crc.get(stored_key).unwrap();
+            match computed_crc.get(stored_key) {
+                Some(computed_value) if computed_value == stored_value => None,
+                _ => Some(CrcMismatchError::new(stored_key)),
+            }
+        });
     match added_errors.chain(diff_errors).next() {
         Some(err) => Err(err),
         None => Ok(()),

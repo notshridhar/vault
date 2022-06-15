@@ -2,14 +2,18 @@ use crate::util::{PathExt, VecExt};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const IGNORE: &[&str] = &[".DS_Store"];
+
 /// Lists all files in the given directory.
 /// - If the directory does not exist, returns empty list.
+/// - Does not match system cache files.
 fn list_files<P: AsRef<Path>>(dir: P) -> Vec<PathBuf> {
     if let Ok(read_results) = fs::read_dir(dir) {
         read_results
             .filter_map(|entry| {
                 let entry_path = entry.unwrap().path();
-                match entry_path.is_file() {
+                let file_name = entry_path.to_filename_str();
+                match entry_path.is_file() && !IGNORE.contains(&file_name) {
                     true => Some(entry_path),
                     false => None,
                 }
@@ -22,13 +26,19 @@ fn list_files<P: AsRef<Path>>(dir: P) -> Vec<PathBuf> {
 
 /// Lists all files in the given directory recursively.
 /// - If the directory does not exist, returns empty list.
+/// - Does not match system cache files.
 fn walk_dir<P: AsRef<Path>>(dir: P) -> Vec<PathBuf> {
     if let Ok(read_results) = fs::read_dir(dir) {
         read_results.fold(Vec::with_capacity(4), |accum, item| {
             let entry_path = item.unwrap().path();
-            match entry_path.is_dir() {
-                true => accum.extend_inplace(walk_dir(entry_path)),
-                false => accum.push_inplace(entry_path),
+            let file_name = entry_path.to_filename_str();
+            if !IGNORE.contains(&file_name) {
+                match entry_path.is_dir() {
+                    true => accum.extend_inplace(walk_dir(entry_path)),
+                    false => accum.push_inplace(entry_path),
+                }
+            } else {
+                accum
             }
         })
     } else {
@@ -38,9 +48,8 @@ fn walk_dir<P: AsRef<Path>>(dir: P) -> Vec<PathBuf> {
 
 /// Removes all empty directories recursively within the given directory.
 /// Returns whether the given directory was completely removed.
-/// Also removes some commonly found system cache files in the process.
+/// Also removes system cache files in the process.
 fn remove_empty_dirs<P: AsRef<Path>>(dir: P) -> bool {
-    let removables = [".DS_Store"];
     if let Ok(read_results) = fs::read_dir(&dir) {
         let is_empty = read_results.fold(true, |accum, item| {
             let entry_path = item.unwrap().path();
@@ -48,7 +57,7 @@ fn remove_empty_dirs<P: AsRef<Path>>(dir: P) -> bool {
                 remove_empty_dirs(entry_path)
             } else {
                 let file_name = entry_path.to_filename_str();
-                match removables.contains(&file_name) {
+                match IGNORE.contains(&file_name) {
                     true => fs::remove_file(entry_path).is_ok(),
                     false => false,
                 }

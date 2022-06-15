@@ -1,25 +1,31 @@
 mod args;
-mod constants;
+mod constant;
 mod crc;
 mod crypto;
 mod glob;
 mod help;
+mod interactive;
 mod secret;
 mod util;
 mod zip;
 
 use chrono::offset::Local;
 use crate::args::{ParsedArgs, ParserError};
-use crate::constants::LOCK_DIR;
+use crate::constant::LOCK_DIR;
 use crate::crc::CrcMismatchError;
 use crate::secret::SecretError;
-use std::io::Write;
+use crate::util::WriteExt;
+use std::io::{self, Write};
+use termion::input::TermRead;
 
 const VERSION: &str = "0.3";
 const HELP_SPECS: &[(&str, &str)] = &[
     ("_section", "usage"),
     ("", "vault [options] command args"),
     ("_section", "commands"),
+    ("login", "starts vault in interactive mode"),
+    ("     ", "this is the recommended method for using vault"),
+    ("     ", "-----"),
     ("get", "prints the secret contents at the given path"),
     ("   ", "usage: get <path>"),
     ("   ", "-----"),
@@ -51,7 +57,6 @@ const HELP_SPECS: &[(&str, &str)] = &[
     ("   ", "usage: crc [--force-update]"),
     ("   ", "-----"),
     ("zip", "packs the encrypted contents for backup"),
-    ("   ", "usage: zip"),
     ("_section", "options"),
     ("--help", "show this help message and exit"),
     ("--version", "show the current version and exit"),
@@ -60,22 +65,34 @@ const HELP_SPECS: &[(&str, &str)] = &[
 /// Prompts for password in stdin. Clears prompt after the password is entered.
 /// In test context, this just returns a default value.
 fn prompt_password() -> String {
-    if cfg!(test) {
-        let pass = rpassword::prompt_password_stdout("password:").unwrap();
-        print!("\x1b[1A\x1b[2K");
-        std::io::stdout().flush().unwrap();
+    if !cfg!(test) {
+        let mut stdin = io::stdin();
+        let mut stdout = io::stdout();
+        stdout.write_all(b"password: ").unwrap();
+        stdout.flush().unwrap();
+        let pass = stdin
+            .read_passwd(&mut stdout)
+            .unwrap()
+            .unwrap_or_default();
+        stdout.move_cursor_to_horiz(0);
+        stdout.clear_current_line();
+        stdout.flush().unwrap();
         pass
     } else {
         "1234".to_owned()
     }
 }
 
-/// Testable entry point for the application.
+/// Testable entry point. Except for the interactive `login` command,
+/// none of the commands directly modify `stdout` or read from `stdin`.
 fn main_app<I, S>(args: I) -> Result<String, VaultCliError>
 where I: IntoIterator<Item = S>, S: AsRef<str> {
     let args = ParsedArgs::from_iter(args);
-
     match args.get_index(1) {
+        Some("login") => {
+            interactive::start_app();
+            Ok("".to_owned())
+        }
         Some("get") => {
             let path = args.expect_index(2, "path")?;
             args.expect_none_except(..=2, &[])?;
@@ -158,7 +175,7 @@ where I: IntoIterator<Item = S>, S: AsRef<str> {
     }
 }
 
-/// Actual entry point for the application.
+/// Actual entry point.
 fn main() {
     match main_app(std::env::args()) {
         Ok(stdout) => if !stdout.is_empty() {
