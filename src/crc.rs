@@ -1,4 +1,6 @@
-use crate::util::PathExt;
+use crate::util::common::PathExt;
+use crate::util::serde::Deserialize;
+use crate::util::serde::Serialize;
 use crc::{Crc, CRC_32_ISCSI};
 use std::collections::HashMap;
 use std::fs;
@@ -42,7 +44,7 @@ fn compute_crc_all<P: AsRef<Path>>(root_dir: P) -> CrcMap {
 fn read_crc_file<P: AsRef<Path>>(root_dir: P) -> CrcMap {
     let crc_file_path = root_dir.as_ref().join("index.crc");
     match fs::read_to_string(crc_file_path) {
-        Ok(contents) => serde_json::from_str(&contents).unwrap(),
+        Ok(contents) => CrcMap::deserialize(&contents).unwrap(),
         Err(_) => HashMap::new(),
     }
 }
@@ -51,9 +53,8 @@ fn read_crc_file<P: AsRef<Path>>(root_dir: P) -> CrcMap {
 /// - If the given directory does not exist, new one is created.
 fn write_crc_file<P: AsRef<Path>>(crc_map: &CrcMap, root_dir: P) {
     let crc_file_path = root_dir.as_ref().join("index.crc");
-    let contents = serde_json::to_string(crc_map).unwrap();
     fs::create_dir_all(root_dir).unwrap();
-    fs::write(crc_file_path, contents).unwrap()
+    fs::write(crc_file_path, crc_map.serialize()).unwrap()
 }
 
 /// Compares computed crc checksum of the given path with the stored value.

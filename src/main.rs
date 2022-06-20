@@ -1,66 +1,20 @@
-mod args;
+mod arg;
 mod constant;
 mod crc;
 mod crypto;
-mod glob;
-mod help;
-mod interactive;
 mod secret;
 mod util;
-mod zip;
 
 use chrono::offset::Local;
-use crate::args::{ParsedArgs, ParserError};
+use crate::arg::{ParsedArgs, ParserError, HelpGenerator};
 use crate::constant::LOCK_DIR;
 use crate::crc::CrcMismatchError;
 use crate::secret::SecretError;
-use crate::util::WriteExt;
+use crate::util::zip::Zipper;
 use std::io::{self, Write};
 use termion::input::TermRead;
 
 const VERSION: &str = "0.3";
-const HELP_SPECS: &[(&str, &str)] = &[
-    ("_section", "usage"),
-    ("", "vault [options] command args"),
-    ("_section", "commands"),
-    ("login", "starts vault in interactive mode"),
-    ("     ", "this is the recommended method for using vault"),
-    ("     ", "-----"),
-    ("get", "prints the secret contents at the given path"),
-    ("   ", "usage: get <path>"),
-    ("   ", "-----"),
-    ("set", "sets the secret contents at the given path"),
-    ("   ", "creates new path if the path is not found"),
-    ("   ", "replaces existing contents otherwise"),
-    ("   ", "usage: set <path> <contents>"),
-    ("   ", "-----"),
-    ("rm", "removes the given path and its contents"),
-    ("  ", "usage: rm <path>"),
-    ("  ", "-----"),
-    ("ls", "lists the paths matching the given pattern"),
-    ("  ", "usage: ls <path-pattern>"),
-    ("  ", "-----"),
-    ("fget", "decrypts paths matching the given pattern"),
-    ("    ", "also works with non-unicode contents unlike get"),
-    ("    ", "usage: fget <path-pattern>"),
-    ("    ", "-----"),
-    ("fset", "encrypts paths matching the given pattern"),
-    ("    ", "also works with non-unicode contents unlike set"),
-    ("    ", "usage: fset <path-pattern>"),
-    ("    ", "-----"),
-    ("fclr", "removes unlocked paths matching the given pattern"),
-    ("    ", "does not affect the actual secret path or contents"),
-    ("    ", "usage: fclr <path-pattern>"),
-    ("    ", "-----"),
-    ("crc", "checks crc integrity for all paths and contents"),
-    ("   ", "passing '--force-update' updates all checksums"),
-    ("   ", "usage: crc [--force-update]"),
-    ("   ", "-----"),
-    ("zip", "packs the encrypted contents for backup"),
-    ("_section", "options"),
-    ("--help", "show this help message and exit"),
-    ("--version", "show the current version and exit"),
-];
 
 /// Prompts for password in stdin. Clears prompt after the password is entered.
 /// In test context, this just returns a default value.
@@ -74,8 +28,9 @@ fn prompt_password() -> String {
             .read_passwd(&mut stdout)
             .unwrap()
             .unwrap_or_default();
-        stdout.move_cursor_to_horiz(0);
-        stdout.clear_current_line();
+        stdout.write_all(b"\r").unwrap();
+        stdout.write_all(" ".repeat(10).as_bytes()).unwrap();
+        stdout.write_all(b"\r").unwrap();
         stdout.flush().unwrap();
         pass
     } else {
@@ -83,14 +38,80 @@ fn prompt_password() -> String {
     }
 }
 
+/// Gets fully formatted help string.
+fn get_help_string() -> String {
+    let mut generator = HelpGenerator::new();
+    generator.push_section("usage");
+    generator.push_line("", "vault [options] command args");
+    generator.push_section("commands");
+    generator.push_line("login","
+        starts vault in interactive mode
+        this is the recommended way of using vault
+        -----
+    ");
+    generator.push_line("get", "
+        prints the secret contents at the given path
+        usage: get <path>
+        -----
+    ");
+    generator.push_line("set", "
+        sets the secret contents at the given path
+        creates new path if the path is not found
+        replaces existing contents otherwise
+        usage: set <path> <contents>
+        -----
+    ");
+    generator.push_line("rm", "
+        removes the given path and its contents
+        usage: rm <path>
+        -----
+    ");
+    generator.push_line("ls", "
+        lists the paths matching the given pattern
+        usage: ls <path-pattern>
+        -----
+    ");
+    generator.push_line("fget", "
+        decrypts paths matching the given pattern
+        also works with non-unicode contents unlike get
+        usage: fget <path-pattern>
+        -----
+    ");
+    generator.push_line("fset", "
+        encrypts paths matching the given pattern
+        also works with non-unicode contents unlike set
+        usage: fset <path-pattern>
+        -----
+    ");
+    generator.push_line("fclr", "
+        removes unlocked paths matching the given pattern
+        does not affect the actual secret path or contents
+        usage: fclr <path-pattern>
+        -----
+    ");
+    generator.push_line("crc", "
+        checks crc integrity for all paths and contents
+        passing '--force-update' updates all checksums
+        usage: crc [--force-update]
+        -----
+    ");
+    generator.push_line("zip", "
+        packs the encrypted contents for backup
+    ");
+    generator.push_section("options");
+    generator.push_line("--help", "show this help message and exit");
+    generator.push_line("--version", "show the current version and exit");
+    generator.generate()
+}
+
 /// Testable entry point. Except for the interactive `login` command,
 /// none of the commands directly modify `stdout` or read from `stdin`.
-fn main_app<I, S>(args: I) -> Result<String, VaultCliError>
-where I: IntoIterator<Item = S>, S: AsRef<str> {
+fn main_app<I>(args: I) -> Result<String, VaultCliError>
+where I: IntoIterator<Item = String> {
     let args = ParsedArgs::from_iter(args);
     match args.get_index(1) {
         Some("login") => {
-            interactive::start_app();
+            // interactive::start_app();
             Ok("".to_owned())
         }
         Some("get") => {
@@ -155,10 +176,11 @@ where I: IntoIterator<Item = S>, S: AsRef<str> {
         Some("zip") => {
             args.expect_none_except(..=1, &[])?;
             let datestamp = Local::now().format("%Y%m%d");
-            let zip_name = format!("vault-{}.zip", datestamp);
-            let zip_entries = &[LOCK_DIR, "vault"];
-            let matched = zip::zip_files(&zip_name, zip_entries).unwrap();
-            Ok(matched.join("\n"))
+            let mut zipper = Zipper::new(format!("vault-{}.zip", datestamp));
+            zipper.zip_dir(LOCK_DIR);
+            zipper.zip_file("vault");
+            let matches = zipper.finish();
+            Ok(matches.join("\n"))
         }
         Some(_) => {
             Err(ParserError::invalid_value("command").into())
@@ -167,7 +189,7 @@ where I: IntoIterator<Item = S>, S: AsRef<str> {
             if args.get_value("version").is_some() {
                 Ok(VERSION.to_owned())
             } else if args.get_value("help").is_some() {
-                Ok(help::get_help_string(HELP_SPECS))
+                Ok(get_help_string())
             } else {
                 Err(ParserError::missing_value("command").into())
             }

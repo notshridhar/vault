@@ -1,14 +1,20 @@
-Client Usage
-------------
-login
-    prompt for pass
-    show virtual folder
+Interactive
+----
+    edit mode
+    ----
     mask passwords
-    highlight active lines
-    shortcuts to copy line without showing
+    shortcuts to copy secret without showing
+
+    gui
+    ----
+    prevent useless rerenders (ex: coming from command mode)
+
+    perf
+    ----
 
 Todo
 ---
+reduce generics
 formatting / linting
 implement password salt (static in a location)
 implement password mask - easier to change password

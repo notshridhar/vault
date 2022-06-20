@@ -77,12 +77,14 @@ impl ParsedArgs {
         } else {
             self.options
                 .keys()
-                .filter(|key|
-                    key.parse::<u16>().is_err() &&
-                    !keys.contains(&key.as_str())
-                )
-                .map(ParserError::invalid_key)
-                .next()
+                .find_map(|key| {
+                    let is_invalid = key.parse::<u16>().is_err()
+                        && !keys.contains(&key.as_str());
+                    match is_invalid {
+                        true => Some(ParserError::invalid_key(key.as_ref())),
+                        false => None
+                    }
+                })
                 .map_or(Ok(()), Err)
         }
     }
@@ -98,18 +100,18 @@ pub enum ParserError {
 
 impl ParserError {
     #[inline(always)]
-    pub fn invalid_key<S: Into<String>>(key: S) -> Self {
-        Self::InvalidKey { key: key.into() }
+    pub fn invalid_key(key: &str) -> Self {
+        Self::InvalidKey { key: key.to_owned() }
     }
 
     #[inline(always)]
-    pub fn missing_value<S: Into<String>>(key: S) -> Self {
-        Self::MissingValue { key: key.into() }
+    pub fn missing_value(key: &str) -> Self {
+        Self::MissingValue { key: key.to_owned() }
     }
 
     #[inline(always)]
-    pub fn invalid_value<S: Into<String>>(key: S) -> Self {
-        Self::InvalidValue { key: key.into() }
+    pub fn invalid_value(key: &str) -> Self {
+        Self::InvalidValue { key: key.to_owned() }
     }
 }
 

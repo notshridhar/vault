@@ -1,8 +1,8 @@
 use crate::constant::{LOCK_DIR, UNLOCK_DIR};
 use crate::crc::{self, CrcMismatchError};
 use crate::crypto;
-use crate::glob;
-use crate::util::{VecExt, PathExt};
+use crate::util::common::{VecExt, PathExt};
+use crate::util::glob;
 use orion::errors::UnknownCryptoError;
 use std::collections::HashMap;
 use std::fs;
@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 /// Hashmap that maps secret paths to numbers.
 /// These numbers can be used to identify encrypted files.
-pub type IndexMap = HashMap<String, u16>;
+pub type IndexMap = HashMap<String, u32>;
 
 type CryptoResult<T> = Result<T, UnknownCryptoError>;
 type SecretResult<T> = Result<T, SecretError>;
@@ -23,14 +23,13 @@ pub fn get_index_file_path() -> PathBuf {
 
 /// Returns the path to the encrypted file with the given index.
 #[inline(always)]
-pub fn get_locked_file_path(index: u16) -> PathBuf {
+pub fn get_locked_file_path(index: u32) -> PathBuf {
     Path::new(LOCK_DIR).join(format!("{:0>3}.vlt", index))
 }
 
 /// Returns the path to the decrypted file with the given relative path.
 #[inline(always)]
-pub fn get_unlocked_file_path<P>(rel_path: P) -> PathBuf
-where P: AsRef<Path> {
+pub fn get_unlocked_file_path(rel_path: &str) -> PathBuf {
     Path::new(UNLOCK_DIR).join(rel_path)
 }
 
@@ -40,7 +39,7 @@ where P: AsRef<Path> {
 #[inline(always)]
 pub fn read_index_file(pass: &str) -> CryptoResult<IndexMap> {
     let index_file_path = get_index_file_path();
-    crypto::read_file_de(index_file_path, pass)
+    crypto::read_file(index_file_path, pass)
         .map(|val| val.unwrap_or_default())
 }
 
@@ -48,24 +47,24 @@ pub fn read_index_file(pass: &str) -> CryptoResult<IndexMap> {
 #[inline(always)]
 pub fn write_index_file(map: &IndexMap, pass: &str) -> CryptoResult<()> {
     let index_file_path = get_index_file_path();
-    crypto::write_file_ser(index_file_path, map, pass)
+    crypto::write_file(index_file_path, map, pass)
 }
 
 /// Reserves an index for a path in the given hashmap.
 /// The least available index is reserved.
-pub fn reserve_index(map: &mut IndexMap, path: &str) -> u16 {
+pub fn reserve_index(map: &mut IndexMap, path: &str) -> u32 {
     let new_index = 1 + map.values()
         .map(|value| value.to_owned())
         .collect::<Vec<_>>()
         .into_sorted()
         .into_iter()
-        .fold(0, |accum, val| accum + (accum + 1 == val) as u16);
+        .fold(0, |accum, val| accum + (accum + 1 == val) as u32);
     map.insert(path.to_owned(), new_index);
     new_index
 }
 
 /// Gets the index for the given path, or reserves it otherwise.
-pub fn get_or_reserve_index(map: &mut IndexMap, path: &str) -> u16 {
+pub fn get_or_reserve_index(map: &mut IndexMap, path: &str) -> u32 {
     match map.get(path) {
         Some(value) => value.to_owned(),
         None => reserve_index(map, path),
@@ -81,7 +80,7 @@ pub fn get_secret(path: &str, pass: &str) -> SecretResult<String> {
     if let Some(enc_index) = index_map.get(path) {
         let enc_path = get_locked_file_path(*enc_index);
         crc::check_crc(&enc_path, LOCK_DIR)?;
-        let contents = crypto::read_file_str(enc_path, pass)?;
+        let contents = crypto::read_file(enc_path, pass)?;
         Ok(contents.unwrap_or_else(|| "<byte>".to_owned()))
     } else {
         Err(SecretError::NonExistentPath)
@@ -95,7 +94,7 @@ pub fn set_secret(path: &str, contents: &str, pass: &str) -> SecretResult<()> {
     let enc_index = get_or_reserve_index(&mut index_map, path);
     let enc_path = get_locked_file_path(enc_index);
     write_index_file(&index_map, pass)?;
-    crypto::write_file_str(&enc_path, contents, pass)?;
+    crypto::write_file(&enc_path, contents, pass)?;
     crc::update_crc(enc_path, LOCK_DIR);
     Ok(())
 }
@@ -121,7 +120,7 @@ pub fn remove_secret(path: &str, pass: &str) -> SecretResult<()> {
 /// - If the password is incorrect, returns `IncorrectPassword`.
 pub fn list_secret_paths(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     let index_map = read_index_file(pass)?;
-    Ok(glob::filter_matching(index_map.into_keys(), pat))
+    Ok(glob::filter_matching(index_map.into_keys(), pat).into_sorted())
 }
 
 /// Decrypts the secret contents of paths matching the given pattern and
@@ -130,15 +129,18 @@ pub fn list_secret_paths(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
 /// - If the checksum verification fails, returns `CrcMismatch`.
 pub fn get_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     let index_map = read_index_file(pass)?;
-    let matched_paths = glob::filter_matching(index_map.keys(), pat);
-    Result::from_iter(matched_paths.into_iter().map(|secret_path| {
-        let enc_index = index_map.get(&secret_path).unwrap();
-        let enc_path = get_locked_file_path(*enc_index);
-        let dec_path = get_unlocked_file_path(&secret_path);
-        crc::check_crc(&enc_path, LOCK_DIR)?;
-        crypto::decrypt_file(enc_path, dec_path, pass)?;
-        Ok(secret_path.to_owned())
-    }))
+    let matched_str = glob::filter_matching(index_map.keys(), pat)
+        .into_sorted()
+        .into_iter()
+        .map(|secret_path| {
+            let enc_index = index_map.get(&secret_path).unwrap();
+            let enc_path = get_locked_file_path(*enc_index);
+            let dec_path = get_unlocked_file_path(&secret_path);
+            crc::check_crc(&enc_path, LOCK_DIR)?;
+            crypto::decrypt_file(enc_path, dec_path, pass)?;
+            Ok(secret_path.to_owned())
+        });
+    Result::from_iter(matched_str)
 }
 
 /// Encrypts the contents of paths matching the given pattern and
@@ -146,23 +148,27 @@ pub fn get_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
 /// - If the password is incorrect, returns `IncorrectPassword`.
 pub fn set_secret_files(pat: &str, pass: &str) -> SecretResult<Vec<String>> {
     let mut index_map = read_index_file(pass)?;
-    let matched_paths = glob::get_matching_files(pat, UNLOCK_DIR);
-    Result::from_iter(matched_paths.into_iter().map(|pathbuf| {
-        let path_str = pathbuf.to_path_str();
-        let enc_index = get_or_reserve_index(&mut index_map, path_str);
-        let enc_path = get_locked_file_path(enc_index);
-        let dec_path = get_unlocked_file_path(path_str);
-        write_index_file(&index_map, pass)?;
-        crypto::encrypt_file(dec_path, &enc_path, pass)?;
-        crc::update_crc(enc_path, LOCK_DIR);
-        Ok(path_str.to_owned())
-    }))
+    let matched_str = glob::get_matching_files(pat, UNLOCK_DIR)
+        .into_sorted()
+        .into_iter()
+        .map(|pathbuf| {
+            let path_str = pathbuf.to_path_str();
+            let enc_index = get_or_reserve_index(&mut index_map, path_str);
+            let enc_path = get_locked_file_path(enc_index);
+            let dec_path = get_unlocked_file_path(path_str);
+            write_index_file(&index_map, pass)?;
+            crypto::encrypt_file(dec_path, &enc_path, pass)?;
+            crc::update_crc(enc_path, LOCK_DIR);
+            Ok(path_str.to_owned())
+        });
+    Result::from_iter(matched_str)
 }
 
 /// Removes all files matching the given pattern in the `unlock` directory.
 /// Using this is recommended to clean up decrypted files after their usage.
 pub fn clear_secret_files(pat: &str) -> Vec<String> {
     glob::remove_matching_files(pat, UNLOCK_DIR)
+        .into_sorted()
         .into_iter()
         .map(|path| path.to_path_str().to_owned())
         .collect()

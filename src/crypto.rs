@@ -1,7 +1,6 @@
+use crate::util::serde::{Serialize, Deserialize};
 use orion::aead;
 use orion::errors::UnknownCryptoError;
-use serde::ser::Serialize;
-use serde::de::DeserializeOwned;
 use std::fs;
 use std::path::Path;
 
@@ -22,10 +21,11 @@ fn decrypt(data: &[u8], pass: &str) -> CryptoResult<Vec<u8>> {
     aead::open(&secret_key, data)
 }
 
-/// Writes out the string contents to encrypted file using the given password.
-pub fn write_file_str<P>(path: P, val: &str, pass: &str) -> CryptoResult<()>
-where P: AsRef<Path> {
-    let contents_enc = encrypt(val.as_bytes(), pass)?;
+/// Writes out the serialized value to encrypted file using the given password.
+pub fn write_file<P, S>(path: P, val: S, pass: &str) -> CryptoResult<()>
+where P: AsRef<Path>, S: Serialize {
+    let val_str = val.serialize();
+    let contents_enc = encrypt(val_str.as_bytes(), pass)?;
     path.as_ref()
         .parent()
         .map(|parent| fs::create_dir_all(parent).unwrap());
@@ -33,33 +33,21 @@ where P: AsRef<Path> {
     Ok(())
 }
 
-/// Reads the string contents of an encrypted file using the given password.
-/// - If the file cannot be read or contains non-utf-8 values, returns `None`.
-/// - If the password does not match, returns `UnknownCryptoError`.
-pub fn read_file_str<P>(path: P, pass: &str) -> CryptoResult<Option<String>>
-where P: AsRef<Path> {
-    if let Ok(contents_enc) = fs::read(path) {
-        let contents_raw = decrypt(&contents_enc, pass)?;
-        Ok(String::from_utf8(contents_raw).ok())
-    } else {
-        Ok(None)
-    }
-}
-
-/// Writes out the serialized value to encrypted file using the given password.
-pub fn write_file_ser<P, S>(path: P, val: S, pass: &str) -> CryptoResult<()>
-where P: AsRef<Path>, S: Serialize {
-    let val_str = serde_json::to_string(&val).unwrap();
-    write_file_str(path, &val_str, pass)
-}
-
 /// Reads the deserialized value of an encrypted file using the given password.
 /// - If the file cannot be read or contains non-utf-8 values, returns `None`.
 /// - If the password does not match, returns `UnknownCryptoError`.
-pub fn read_file_de<P, D>(path: P, pass: &str) -> CryptoResult<Option<D>>
-where P: AsRef<Path>, D: DeserializeOwned {
-    read_file_str(path, pass)
-        .map(|res| res.map(|val| serde_json::from_str(&val).unwrap()))
+pub fn read_file<P, D>(path: P, pass: &str) -> CryptoResult<Option<D>>
+where P: AsRef<Path>, D: Deserialize {
+    let result = if let Ok(contents_enc) = fs::read(path) {
+        let contents_raw = decrypt(&contents_enc, pass)?;
+        match String::from_utf8(contents_raw) {
+            Ok(contents_str) => D::deserialize(&contents_str),
+            Err(_) => None
+        }
+    } else {
+        None
+    };
+    Ok(result)
 }
 
 /// Encrypts contents of src file into the dest file using the given password.
@@ -131,8 +119,9 @@ mod test {
     #[test]
     fn should_read_non_existent_file_str_with_any_pass() {
         let file_path = Path::new(CRYPTO_DIR).join("key");
+        let result = None as Option<String>;
         run_test(|| {
-            assert_eq!(super::read_file_str(file_path, "1234"), Ok(None));
+            assert_eq!(super::read_file(file_path, "1234"), Ok(result));
         })
     }
 
@@ -141,30 +130,31 @@ mod test {
         let (data, pass) = ("contents".to_owned(), "1234");
         let file_path = Path::new(CRYPTO_DIR).join("key");
         run_test(|| {
-            assert_eq!(super::write_file_str(&file_path, &data, pass), Ok(()));
-            assert_eq!(super::read_file_str(file_path, pass), Ok(Some(data)));
+            assert_eq!(super::write_file(&file_path, &data, pass), Ok(()));
+            assert_eq!(super::read_file(file_path, pass), Ok(Some(data)));
         })
     }
 
     #[test]
     fn should_not_write_and_read_file_str_with_different_pass() {
+        type Result = super::CryptoResult<Option<String>>;
         let (data, pass) = ("contents".to_owned(), "1234");
         let file_path = Path::new(CRYPTO_DIR).join("key");
-        let error = Err(UnknownCryptoError);
+        let error = Err(UnknownCryptoError) as Result;
         run_test(|| {
-            assert_eq!(super::write_file_str(&file_path, &data, pass), Ok(()));
-            assert_eq!(super::read_file_str(file_path, "12345"), error);
+            assert_eq!(super::write_file(&file_path, &data, pass), Ok(()));
+            assert_eq!(super::read_file(file_path, "12345"), error);
         })
     }
 
     #[test]
     fn should_write_and_read_file_serde_with_same_pass() {
-        let data = HashMap::from([("key".to_owned(), "value".to_owned())]);
+        let data = HashMap::from([("key".to_owned(), 1234_u32)]);
         let pass = "1234";
         let file_path = Path::new(CRYPTO_DIR).join("key");
         run_test(|| {
-            assert_eq!(super::write_file_ser(&file_path, &data, pass), Ok(()));
-            assert_eq!(super::read_file_de(file_path, pass), Ok(Some(data)));
+            assert_eq!(super::write_file(&file_path, &data, pass), Ok(()));
+            assert_eq!(super::read_file(file_path, pass), Ok(Some(data)));
         })
     }
 
