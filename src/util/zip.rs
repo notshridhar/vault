@@ -1,4 +1,4 @@
-use super::common::PathExt;
+use super::ext::PathExt;
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -59,7 +59,7 @@ impl Zipper {
 
 #[cfg(test)]
 mod test {
-    use super::super::common::PathExt;
+    use super::super::ext::PathExt;
     use once_cell::sync::Lazy;
     use std::fs;
     use std::panic;

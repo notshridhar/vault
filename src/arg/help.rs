@@ -2,7 +2,7 @@ use std::cmp;
 
 const SECTION_DEF: &str = "__section__";
 
-/// Generate formatted help string from given specs.
+/// Generate formatted help string from the given specifications.
 pub struct HelpGenerator {
     specs: Vec<(String, String)>,
 }
@@ -14,7 +14,7 @@ impl HelpGenerator {
     }
 
     /// Ends the last section, and adds a new section.
-    /// Pushing further lines append them to this section.
+    /// Pushing further lines appends them to this section.
     pub fn push_section(&mut self, name: &str) {
         self.specs.push((SECTION_DEF.to_owned(), name.to_owned()))
     }
@@ -27,8 +27,14 @@ impl HelpGenerator {
             .enumerate()
             .for_each(|(i, line)| {
                 let line_trim = line.trim().to_owned();
-                let key = if i == 0 { key.to_owned() } else { String::new() };
-                self.specs.push((key, line_trim))
+                let key_own = if key.is_empty() {
+                    String::new()
+                } else if i == 0 {
+                    key.to_owned()
+                } else {
+                    " ".to_owned()
+                };
+                self.specs.push((key_own, line_trim))
             });
     }
 
@@ -36,6 +42,7 @@ impl HelpGenerator {
     pub fn generate(self) -> String {
         let space = self.specs
             .iter()
+            .filter(|item| item.0 != SECTION_DEF)
             .fold(0, |max, item| cmp::max(item.0.len(), max));
         self.specs
             .iter()

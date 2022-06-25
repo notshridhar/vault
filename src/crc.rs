@@ -1,4 +1,4 @@
-use crate::util::common::PathExt;
+use crate::util::ext::PathExt;
 use crate::util::serde::Deserialize;
 use crate::util::serde::Serialize;
 use crc::{Crc, CRC_32_ISCSI};

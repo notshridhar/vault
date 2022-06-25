@@ -1,8 +1,16 @@
 use std::io::Write;
-use termion::color::Color;
 
-/// Extension trait for `Write` trait.
-pub trait WriteExt {
+/// ANSI terminal color
+#[derive(Copy, Clone)]
+pub enum Color {
+    Red = 1,
+    Green = 2,
+    Yellow = 3,
+    Reset = 9,
+}
+
+/// Easy cursor control over ANSI terminals.
+pub trait TermControl {
     fn write_str<S: AsRef<str>>(&mut self, value: S);
     fn clear_line_to_end(&mut self);
     fn clear_line_to_start(&mut self);
@@ -16,110 +24,107 @@ pub trait WriteExt {
     fn move_cursor_down(&mut self, rows: u16);
     fn move_cursor_right(&mut self, cols: u16);
     fn move_cursor_left(&mut self, cols: u16);
-    fn use_color_fg<C: Color>(&mut self, color: C);
-    fn use_color_bg<C: Color>(&mut self, color: C);
+    fn use_color_fg(&mut self, color: Color);
+    fn use_color_bg(&mut self, color: Color);
+    fn apply_space(&mut self, cols: u16);
     fn apply_backspace(&mut self, cols: u16);
+    fn draw_box(&mut self, rows: u16, cols: u16);
 }
 
-impl<W: Write> WriteExt for W {
-    #[inline(always)]
+impl<W: Write> TermControl for W {
+    #[inline]
     fn write_str<S: AsRef<str>>(&mut self, value: S) {
         self.write_all(value.as_ref().as_bytes()).unwrap();
     }
 
-    #[inline(always)]
+    #[inline]
     fn clear_line_to_end(&mut self) {
         write!(self, "\x1b[0K").unwrap();
     }
 
-    #[inline(always)]
+    #[inline]
     fn clear_line_to_start(&mut self) {
         write!(self, "\x1b[1K").unwrap();
     }
 
-    #[inline(always)]
+    #[inline]
     fn clear_line_full(&mut self) {
         write!(self, "\x1b[2K").unwrap();
     }
 
-    #[inline(always)]
+    #[inline]
     fn clear_screen(&mut self) {
         write!(self, "\x1b[2J\x1b[3J").unwrap();
     }
 
-    #[inline(always)]
+    #[inline]
     fn show_cursor(&mut self) {
-        write!(self, "{}", termion::cursor::Show).unwrap();
+        write!(self, "\x1b[?25h").unwrap();
     }
 
-    #[inline(always)]
+    #[inline]
     fn hide_cursor(&mut self) {
-        write!(self, "{}", termion::cursor::Hide).unwrap();
+        write!(self, "\x1b[?25l").unwrap();
     }
 
-    #[inline(always)]
+    #[inline]
     fn move_cursor_to(&mut self, row: u16, col: u16) {
         write!(self, "\x1b[{};{}H", row + 1, col + 1).unwrap();
     }
 
-    #[inline(always)]
+    #[inline]
     fn move_cursor_to_horiz(&mut self, col: u16) {
         write!(self, "\x1b[{}G", col + 1).unwrap();
     }
 
-    #[inline(always)]
+    #[inline]
     fn move_cursor_up(&mut self, rows: u16) {
         if rows > 0 {
             write!(self, "\x1b[{}A", rows).unwrap();
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn move_cursor_down(&mut self, rows: u16) {
         // for some reason, '\x1b[{}B' completely ceases
         // to work sometimes. (observed in mac terminal)
         self.write_str("\n".repeat(rows as usize))
     }
 
-    #[inline(always)]
+    #[inline]
     fn move_cursor_right(&mut self, cols: u16) {
         if cols > 0 {
             write!(self, "\x1b[{}C", cols).unwrap();
         }
     }
 
-    #[inline(always)]
+    #[inline]
     fn move_cursor_left(&mut self, cols: u16) {
         if cols > 0 {
             write!(self, "\x1b[{}D", cols).unwrap();
         }
     }
 
-    #[inline(always)]
-    fn use_color_fg<C: Color>(&mut self, color: C) {
-        write!(self, "{}", termion::color::Fg(color)).unwrap()
+    #[inline]
+    fn use_color_fg(&mut self, color: Color) {
+        write!(self, "\x1b[3{}m", color as u8).unwrap()
     }
 
-    #[inline(always)]
-    fn use_color_bg<C: Color>(&mut self, color: C) {
-        write!(self, "{}", termion::color::Bg(color)).unwrap()
+    #[inline]
+    fn use_color_bg(&mut self, color: Color) {
+        write!(self, "\x1b[4{}m", color as u8).unwrap()
     }
 
-    #[inline(always)]
+    fn apply_space(&mut self, cols: u16) {
+        (0..cols).for_each(|_| self.write_all(&[' ' as u8]).unwrap());
+    }
+
     fn apply_backspace(&mut self, cols: u16) {
         self.move_cursor_left(cols);
         self.write_str(" ".repeat(cols as usize));
         self.move_cursor_left(cols);
     }
-}
 
-/// User interface extension trait for `Write` trait.
-pub trait WriteUiExt {
-    fn draw_box(&mut self, rows: u16, cols: u16);
-    fn draw_window_title(&mut self, title: &str);
-}
-
-impl<W: Write> WriteUiExt for W {
     fn draw_box(&mut self, rows: u16, cols: u16) {
         self.write_str("\u{250c}");
         self.write_str("\u{2500}".repeat(cols as usize - 2));
@@ -134,15 +139,5 @@ impl<W: Write> WriteUiExt for W {
         self.write_str("\u{2514}");
         self.write_str("\u{2500}".repeat(cols as usize - 2));
         self.write_str("\u{2518}");
-        self.move_cursor_up(rows);
-        self.move_cursor_left(cols);
-    }
-
-    fn draw_window_title(&mut self, title: &str) {
-        self.move_cursor_right(3);
-        self.write_str(" ");
-        self.write_str(title);
-        self.write_str(" ");
-        self.move_cursor_left(title.len() as u16 + 4)
-    }
+    }    
 }

@@ -12,6 +12,9 @@ usage:
     vault [options] command args
 
 commands:
+    tui        starts vault in interactive mode
+               this is the recommended way of using vault
+               -----
     get        prints the secret contents at the given path
                usage: get <path>
                -----
@@ -43,7 +46,6 @@ commands:
                usage: crc [--force-update]
                -----
     zip        packs the encrypted contents for backup
-               usage: zip
 
 options:
     --help     show this help message and exit
